@@ -1,0 +1,122 @@
+/*
+ * (c) 2023-2026, Infineon Technologies AG, or an affiliate of Infineon
+ * Technologies AG. All rights reserved.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
+ */
+
+/**
+ * \file protection_mpc_api.h
+ * \brief This file contains MPC driver API declaration.
+ *
+ * It's expected that MPC driver implementation follows API declared in this file.
+ */
+
+#ifndef PROTECTION_MPC_API_H
+#define PROTECTION_MPC_API_H
+
+#include "fih.h"
+#include "load/asset_defs.h"
+#include "protection_types.h"
+#include "tfm_hal_defs.h"
+
+/**
+ * \brief Configures the Memory Protection Controller.
+ *
+ * \return  TFM_HAL_SUCCESS       - static MPC initialized successfully
+ *          TFM_HAL_ERROR_GENERIC - failed to init static MPC
+ */
+FIH_RET_TYPE(enum tfm_hal_status_t) ifx_mpc_init_cfg(void);
+
+#ifdef TFM_FIH_PROFILE_ON
+/**
+ * \brief Validates critical configuration of MPC.
+ *
+ * \return A status code as specified in \ref tfm_hal_status_t
+ */
+FIH_RET_TYPE(enum tfm_hal_status_t) ifx_mpc_verify_static_boundaries(void);
+#endif /* TFM_FIH_PROFILE_ON */
+
+#if IFX_MPC_CONFIGURED_BY_TFM
+
+/**
+ * \brief Apply MPC protection to numbered MMIO asset.
+ *
+ * \param[in] mpc_cfg   MPC configuration settings that should be used. See
+ *                      \ref ifx_mpc_numbered_mmio_config_t structure for more
+ *                      details.
+ * \param[in] asset     Numbered MMIO asset that should be protected.
+ *
+ * \return    TFM_HAL_SUCCESS             - MPC configuration applied successfully.
+ *            TFM_HAL_ERROR_NOT_SUPPORTED - asset can not be protected by MPCs.
+ *                                          Can occur when MPC that should
+ *                                          protect the asset is not controlled
+ *                                          by TFM.
+ *            TFM_HAL_ERROR_GENERIC       - failed to apply MPC configuration.
+ */
+
+FIH_RET_TYPE(enum tfm_hal_status_t) ifx_mpc_isolate_numbered_mmio(
+                                                    const ifx_mpc_numbered_mmio_config_t* mpc_cfg,
+                                                    const struct asset_desc_t* asset);
+
+#endif /* IFX_MPC_CONFIGURED_BY_TFM */
+
+/**
+ * \brief Check access to memory region by MPC.
+ *
+ * \param[in] p_info          Pointer to partition info \ref ifx_partition_info_t.
+ * \param[in]   base          The base address of the region.
+ * \param[in]   size          The size of the region.
+ * \param[in]   access_type   The memory access types to be checked between
+ *                            given memory and boundaries.
+ *
+ * \return TFM_HAL_SUCCESS - The memory region has the access permissions by MPC.
+ *         TFM_HAL_ERROR_MEM_FAULT - The memory region has not the access
+ *                                   permissions by MPC.
+ *         TFM_HAL_ERROR_INVALID_INPUT - Invalid inputs.
+ */
+FIH_RET_TYPE(enum tfm_hal_status_t) ifx_mpc_memory_check(const struct ifx_partition_info_t *p_info,
+                                                         uintptr_t base,
+                                                         size_t size,
+                                                         uint32_t access_type);
+
+#if IFX_MPC_DRIVER_HW_MPC_WITH_ROT && IFX_MPC_DRIVER_HW_MPC_WITHOUT_ROT
+/**
+ * \brief Check whether the given platform MPC uses ROT-based configuration.
+ *
+ * Some platforms support MPC instances that support ROT attributes with
+ * instances that expose only Secure/Non-Secure configuration. This function
+ * lets the common MPC driver select the correct programming and verification
+ * path for the provided MPC.
+ *
+ * \param[in] mpc Pointer to the MPC instance being queried.
+ *
+ * \retval true  MPC uses ROT-based configuration.
+ * \retval false MPC uses non-ROT configuration.
+ */
+bool ifx_platform_mpc_is_rot(const MPC_Type *mpc);
+#endif /* IFX_MPC_DRIVER_HW_MPC_WITH_ROT && IFX_MPC_DRIVER_HW_MPC_WITHOUT_ROT */
+
+/**
+ * \brief Check whether the given MPC uses ROT-based configuration.
+ *
+ * Some platforms support MPC instances that support ROT attributes with
+ * instances that expose only Secure/Non-Secure configuration. This function
+ * lets the common MPC driver select the correct programming and verification
+ * path for the provided MPC.
+ *
+ * \param[in] mpc Pointer to the MPC instance being queried.
+ *
+ * \retval true  MPC uses ROT-based configuration.
+ * \retval false MPC uses non-ROT configuration.
+ */
+#if IFX_MPC_DRIVER_HW_MPC_WITH_ROT && IFX_MPC_DRIVER_HW_MPC_WITHOUT_ROT
+#define IFX_MPC_IS_ROT(mpc) ifx_platform_mpc_is_rot(mpc)
+#elif IFX_MPC_DRIVER_HW_MPC_WITH_ROT
+#define IFX_MPC_IS_ROT(mpc) (true)
+#elif IFX_MPC_DRIVER_HW_MPC_WITHOUT_ROT
+#define IFX_MPC_IS_ROT(mpc) (false)
+#endif /* IFX_MPC_DRIVER_HW_MPC_WITH_ROT && IFX_MPC_DRIVER_HW_MPC_WITHOUT_ROT */
+
+#endif /* PROTECTION_MPC_API_H */

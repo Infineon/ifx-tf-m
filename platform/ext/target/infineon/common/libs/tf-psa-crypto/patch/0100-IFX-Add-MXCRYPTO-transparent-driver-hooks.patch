@@ -1,0 +1,888 @@
+From cff5e76bd5678203d60dea54ce3f1fb2cf843710 Mon Sep 17 00:00:00 2001
+From: "Kozemchuk Ivan (CSS ICW SW SCV BFS SFW / EE)"
+ <Ivan.Kozemchuk-EE@infineon.com>
+Date: Fri, 15 May 2026 12:17:23 +0300
+Subject: [PATCH] IFX: Add MXCRYPTO transparent accelerator driver hooks
+
+Ports the IFX_PSA_MXCRYPTO_PRESENT conditional regions from
+ifx-mbedtls onto the tf-psa-crypto layout, wiring the Infineon
+MXCRYPTO transparent hardware accelerator (driver ID 6) into the
+PSA driver wrapper dispatch for sign/verify_message, sign/verify_hash,
+cipher_*, hash_*, aead_*, mac_*, asymmetric_encrypt/decrypt,
+key_agreement, generate_key and public key export.
+
+All additions are guarded by IFX_PSA_MXCRYPTO_PRESENT (and feature
+sub-flags like IFX_PSA_MXCRYPTO_CIPHER, _SHA, _AEAD, _MAC, _ECDSA_SIGN,
+_ECDSA_VERIFY, _KEY_GENERATION, _RSA_ENCRYPT, _RSA_DECRYPT, _ECDH,
+_PUBLIC_KEY_EXPORT) so the patch is a no-op when the macro is
+undefined.
+---
+ core/psa_crypto_driver_wrappers.h             | 371 +++++++++++++++++-
+ core/psa_crypto_driver_wrappers_no_static.c   |  25 +-
+ .../psa/crypto_driver_contexts_composites.h   |  12 +
+ .../psa/crypto_driver_contexts_primitives.h   |  16 +
+ 4 files changed, 419 insertions(+), 5 deletions(-)
+
+diff --git a/core/psa_crypto_driver_wrappers.h b/core/psa_crypto_driver_wrappers.h
+index b5496f7..2a0f3ca 100644
+--- a/core/psa_crypto_driver_wrappers.h
++++ b/core/psa_crypto_driver_wrappers.h
+@@ -71,6 +71,16 @@
+ #include "cc3xx.h"
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
+ 
++#if defined(IFX_PSA_MXCRYPTO_PRESENT)
++#ifndef PSA_CRYPTO_DRIVER_PRESENT
++#define PSA_CRYPTO_DRIVER_PRESENT
++#endif
++#ifndef PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT
++#define PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT
++#endif
++#include "ifx_mxcrypto_transparent_functions.h"
++#endif /* IFX_PSA_MXCRYPTO_PRESENT */
++
+ /* END-driver headers */
+ 
+ /* Auto-generated values depending on which drivers are registered.
+@@ -88,6 +98,9 @@ enum {
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+     PSA_CRYPTO_CC3XX_DRIVER_ID,
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT)
++    IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID,
++#endif /* IFX_PSA_MXCRYPTO_PRESENT */
+ };
+ 
+ /* END-driver id */
+@@ -96,6 +109,11 @@ enum {
+ 
+ /* END-Common Macro definitions */
+ 
++#if defined(IFX_PSA_MXCRYPTO_PRESENT)
++#include "crypto_common.h"
++static cy_cmgr_crypto_hw_t crypto_obj = CY_CMGR_CRYPTO_OBJ_INIT;
++#endif /* IFX_PSA_MXCRYPTO_PRESENT */
++
+ static inline psa_status_t psa_driver_wrapper_init( void )
+ {
+     psa_status_t status = PSA_ERROR_CORRUPTION_DETECTED;
+@@ -122,6 +140,10 @@ static inline psa_status_t psa_driver_wrapper_init( void )
+         return( status );
+ #endif
+ 
++#if defined(IFX_PSA_MXCRYPTO_PRESENT)
++    (void)cy_hw_crypto_reserve(&crypto_obj, CY_CMGR_CRYPTO_VU);
++#endif /* IFX_PSA_MXCRYPTO_PRESENT */
++
+     (void) status;
+     return( PSA_SUCCESS );
+ }
+@@ -133,6 +155,10 @@ static inline void psa_driver_wrapper_free( void )
+     mbedtls_test_opaque_free( );
+ #endif
+ 
++#if defined(IFX_PSA_MXCRYPTO_PRESENT)
++    cy_hw_crypto_release(&crypto_obj);
++#endif /* IFX_PSA_MXCRYPTO_PRESENT */
++
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+     (void)cc3xx_free();
+ #endif
+@@ -191,6 +217,13 @@ static inline psa_status_t psa_driver_wrapper_sign_message(
+                         signature_length );
+             return( status );
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_ECDSA_SIGN)
++            status = ifx_mxcrypto_transparent_sign_message( attributes,
++                        key_buffer, key_buffer_size, alg, input, input_length,
++                        signature, signature_size, signature_length);
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_ECDSA_SIGN */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+             return( psa_sign_message_builtin( attributes,
+                                               key_buffer,
+@@ -278,6 +311,13 @@ static inline psa_status_t psa_driver_wrapper_verify_message(
+                         signature_length );
+             return( status );
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_ECDSA_VERIFY)
++            status = ifx_mxcrypto_transparent_verify_message( attributes,
++                        key_buffer, key_buffer_size, alg, input, input_length,
++                        signature, signature_length);
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_ECDSA_VERIFY */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+             return( psa_verify_message_builtin( attributes,
+                                                 key_buffer,
+@@ -377,6 +417,15 @@ static inline psa_status_t psa_driver_wrapper_sign_hash(
+                 return( status );
+             }
+ #endif /* MBEDTLS_PSA_P256M_DRIVER_ENABLED */
++#endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
++#if defined(PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT)
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_ECDSA_SIGN)
++            status = ifx_mxcrypto_transparent_sign_hash( attributes,
++                        key_buffer, key_buffer_size, alg, hash, hash_length,
++                        signature, signature_size, signature_length);
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_ECDSA_SIGN */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+             /* Fell through, meaning no accelerator supports this operation */
+             return( psa_sign_hash_builtin( attributes,
+@@ -403,6 +452,8 @@ static inline psa_status_t psa_driver_wrapper_sign_hash(
+                                                              signature_size,
+                                                              signature_length ) );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
++#if defined(PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT)
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+         default:
+             /* Key is declared with a lifetime not known to us */
+@@ -473,6 +524,15 @@ static inline psa_status_t psa_driver_wrapper_verify_hash(
+                 return( status );
+             }
+ #endif /* MBEDTLS_PSA_P256M_DRIVER_ENABLED */
++#endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
++#if defined(PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT)
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_ECDSA_VERIFY)
++            status = ifx_mxcrypto_transparent_verify_hash( attributes,
++                        key_buffer, key_buffer_size, alg, hash, hash_length,
++                        signature, signature_length);
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_ECDSA_VERIFY */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+ 
+             return( psa_verify_hash_builtin( attributes,
+@@ -771,6 +831,8 @@ static inline psa_status_t psa_driver_wrapper_get_key_buffer_size_from_key_data(
+             return( ( *key_buffer_size != 0 ) ?
+                     PSA_SUCCESS : PSA_ERROR_NOT_SUPPORTED );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT)
++#endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+ 
+         default:
+             (void)key_type;
+@@ -846,6 +908,13 @@ static inline psa_status_t psa_driver_wrapper_generate_key(
+                 }
+ 
+ #endif /* MBEDTLS_PSA_P256M_DRIVER_ENABLED */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_KEY_GENERATION)
++                status = ifx_mxcrypto_transparent_generate_key(
++                    attributes, key_buffer, key_buffer_size,
++                    key_buffer_length );
++                if( status != PSA_ERROR_NOT_SUPPORTED )
++                    break;
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_KEY_GENERATION */
+             }
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+ 
+@@ -952,7 +1021,6 @@ static inline psa_status_t psa_driver_wrapper_import_key(
+         ));
+ #endif
+ 
+-
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+         default:
+             (void)status;
+@@ -1000,7 +1068,6 @@ static inline psa_status_t psa_driver_wrapper_export_key(
+         ));
+ #endif
+ 
+-
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+         default:
+             /* Key is declared with a lifetime not known to us */
+@@ -1036,7 +1103,6 @@ static inline psa_status_t psa_driver_wrapper_copy_key(
+         ));
+ #endif
+ 
+-
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+         default:
+             (void)source_key;
+@@ -1047,7 +1113,6 @@ static inline psa_status_t psa_driver_wrapper_copy_key(
+             status = PSA_ERROR_INVALID_ARGUMENT;
+     }
+     return( status );
+-
+ }
+ 
+ /*
+@@ -1095,6 +1160,22 @@ static inline psa_status_t psa_driver_wrapper_cipher_encrypt(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_CIPHER)
++            status = ifx_mxcrypto_transparent_cipher_encrypt( attributes,
++                                                              key_buffer,
++                                                              key_buffer_size,
++                                                              alg,
++                                                              iv,
++                                                              iv_length,
++                                                              input,
++                                                              input_length,
++                                                              output,
++                                                              output_size,
++                                                              output_length );
++
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_CIPHER */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_cipher_encrypt( attributes,
+                                            key_buffer,
+@@ -1200,6 +1281,20 @@ static inline psa_status_t psa_driver_wrapper_cipher_decrypt(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_CIPHER)
++            status = ifx_mxcrypto_transparent_cipher_decrypt( attributes,
++                                                              key_buffer,
++                                                              key_buffer_size,
++                                                              alg,
++                                                              input,
++                                                              input_length,
++                                                              output,
++                                                              output_size,
++                                                              output_length );
++
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_CIPHER */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_cipher_decrypt( attributes,
+                                            key_buffer,
+@@ -1292,6 +1387,19 @@ static inline psa_status_t psa_driver_wrapper_cipher_encrypt_setup(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_CIPHER)
++            status = ifx_mxcrypto_transparent_cipher_encrypt_setup(
++                &operation->ctx.ifx_mxcrypto_ctx,
++                attributes,
++                key_buffer,
++                key_buffer_size,
++                alg );
++            if( status == PSA_SUCCESS )
++                operation->id = IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID;
++
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_CIPHER */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_cipher_encrypt_setup(
+                 &operation->ctx.cc3xx_driver_ctx,
+@@ -1381,6 +1489,19 @@ static inline psa_status_t psa_driver_wrapper_cipher_decrypt_setup(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_CIPHER)
++            status = ifx_mxcrypto_transparent_cipher_decrypt_setup(
++                &operation->ctx.ifx_mxcrypto_ctx,
++                attributes,
++                key_buffer,
++                key_buffer_size,
++                alg );
++            if( status == PSA_SUCCESS )
++                operation->id = IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID;
++
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_CIPHER */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_cipher_decrypt_setup(
+                 &operation->ctx.cc3xx_driver_ctx,
+@@ -1460,6 +1581,12 @@ static inline psa_status_t psa_driver_wrapper_cipher_set_iv(
+                         &operation->ctx.opaque_test_driver_ctx,
+                         iv, iv_length ) );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_CIPHER)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            return( ifx_mxcrypto_transparent_cipher_set_iv(
++                        &operation->ctx.ifx_mxcrypto_ctx,
++                        iv, iv_length ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_CIPHER */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_cipher_set_iv(
+@@ -1509,6 +1636,13 @@ static inline psa_status_t psa_driver_wrapper_cipher_update(
+                         input, input_length,
+                         output, output_size, output_length ) );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_CIPHER)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            return( ifx_mxcrypto_transparent_cipher_update(
++                        &operation->ctx.ifx_mxcrypto_ctx,
++                        input, input_length,
++                        output, output_size, output_length ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_CIPHER */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_cipher_update(
+@@ -1556,6 +1690,12 @@ static inline psa_status_t psa_driver_wrapper_cipher_finish(
+                         &operation->ctx.opaque_test_driver_ctx,
+                         output, output_size, output_length ) );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_CIPHER)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            return( ifx_mxcrypto_transparent_cipher_finish(
++                        &operation->ctx.ifx_mxcrypto_ctx,
++                        output, output_size, output_length ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_CIPHER */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_cipher_finish(
+@@ -1602,6 +1742,11 @@ static inline psa_status_t psa_driver_wrapper_cipher_abort(
+                 sizeof( operation->ctx.opaque_test_driver_ctx ) );
+             return( status );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_CIPHER)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            return( ifx_mxcrypto_transparent_cipher_abort(
++                        &operation->ctx.ifx_mxcrypto_ctx ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_CIPHER */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             status = cc3xx_cipher_abort(
+@@ -1649,6 +1794,14 @@ static inline psa_status_t psa_driver_wrapper_hash_compute(
+     return( status );
+ #endif /* defined(PSA_WANT_ALG_SHA_384) || defined(PSA_WANT_ALG_SHA_512) */
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_SHA)
++    status = ifx_mxcrypto_transparent_hash_compute(
++                alg, input, input_length, hash, hash_size, hash_length );
++    if( status != PSA_ERROR_NOT_SUPPORTED )
++    {
++        return( status );
++    }
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_SHA */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+ 
+     /* If software fallback is compiled in, try fallback */
+@@ -1696,6 +1849,20 @@ static inline psa_status_t psa_driver_wrapper_hash_setup(
+     return( status );
+ #endif /* defined(PSA_WANT_ALG_SHA_384) || defined(PSA_WANT_ALG_SHA_512) */
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_SHA)
++    status = ifx_mxcrypto_transparent_hash_setup(
++                &operation->ctx.ifx_mxcrypto_ctx, alg );
++
++    if( status == PSA_SUCCESS )
++    {
++        operation->id = IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID;
++    }
++
++    if( status != PSA_ERROR_NOT_SUPPORTED )
++    {
++        return( status );
++    }
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_SHA */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+ 
+     /* If software fallback is compiled in, try fallback */
+@@ -1727,6 +1894,15 @@ static inline psa_status_t psa_driver_wrapper_hash_clone(
+                                             &target_operation->ctx.mbedtls_ctx ) );
+ #endif
+ #if defined(PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT)
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_SHA)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            target_operation->id = IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID;
++            return( ifx_mxcrypto_transparent_hash_clone(
++                    &source_operation->ctx.ifx_mxcrypto_ctx,
++                    &target_operation->ctx.ifx_mxcrypto_ctx ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_SHA */
++#endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
++#if defined(PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT)
+ #if defined(PSA_CRYPTO_DRIVER_TEST)
+         case MBEDTLS_TEST_TRANSPARENT_DRIVER_ID:
+             target_operation->id = MBEDTLS_TEST_TRANSPARENT_DRIVER_ID;
+@@ -1762,6 +1938,14 @@ static inline psa_status_t psa_driver_wrapper_hash_update(
+                                              input, input_length ) );
+ #endif
+ #if defined(PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT)
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_SHA)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            return( ifx_mxcrypto_transparent_hash_update(
++                        &operation->ctx.ifx_mxcrypto_ctx,
++                        input, input_length ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_SHA */
++#endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
++#if defined(PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT)
+ #if defined(PSA_CRYPTO_DRIVER_TEST)
+         case MBEDTLS_TEST_TRANSPARENT_DRIVER_ID:
+             return( mbedtls_test_transparent_hash_update(
+@@ -1796,6 +1980,14 @@ static inline psa_status_t psa_driver_wrapper_hash_finish(
+                                              hash, hash_size, hash_length ) );
+ #endif
+ #if defined(PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT)
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_SHA)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            return( ifx_mxcrypto_transparent_hash_finish(
++                        &operation->ctx.ifx_mxcrypto_ctx,
++                        hash, hash_size, hash_length ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_SHA */
++#endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
++#if defined(PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT)
+ #if defined(PSA_CRYPTO_DRIVER_TEST)
+         case MBEDTLS_TEST_TRANSPARENT_DRIVER_ID:
+             return( mbedtls_test_transparent_hash_finish(
+@@ -1827,6 +2019,13 @@ static inline psa_status_t psa_driver_wrapper_hash_abort(
+             return( mbedtls_psa_hash_abort( &operation->ctx.mbedtls_ctx ) );
+ #endif
+ #if defined(PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT)
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_SHA)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            return( ifx_mxcrypto_transparent_hash_abort(
++                        &operation->ctx.ifx_mxcrypto_ctx ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_SHA */
++#endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
++#if defined(PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT)
+ #if defined(PSA_CRYPTO_DRIVER_TEST)
+         case MBEDTLS_TEST_TRANSPARENT_DRIVER_ID:
+             return( mbedtls_test_transparent_hash_abort(
+@@ -2011,6 +2210,17 @@ static inline psa_status_t psa_driver_wrapper_aead_encrypt(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_AEAD)
++            status = ifx_mxcrypto_transparent_aead_encrypt(
++                         attributes, key_buffer, key_buffer_size,
++                         alg,
++                         nonce, nonce_length,
++                         additional_data, additional_data_length,
++                         plaintext, plaintext_length,
++                         ciphertext, ciphertext_size, ciphertext_length );
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_aead_encrypt(
+                         attributes, key_buffer, key_buffer_size,
+@@ -2087,6 +2297,17 @@ static inline psa_status_t psa_driver_wrapper_aead_decrypt(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_AEAD)
++            status = ifx_mxcrypto_transparent_aead_decrypt(
++                        attributes, key_buffer, key_buffer_size,
++                        alg,
++                        nonce, nonce_length,
++                        additional_data, additional_data_length,
++                        ciphertext, ciphertext_length,
++                        plaintext, plaintext_size, plaintext_length );
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_aead_decrypt(
+                         attributes, key_buffer, key_buffer_size,
+@@ -2162,6 +2383,15 @@ static inline psa_status_t psa_driver_wrapper_aead_encrypt_setup(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_AEAD)
++            operation->id = IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID;
++            status = ifx_mxcrypto_transparent_aead_encrypt_setup(
++                        &operation->ctx.ifx_mxcrypto_ctx,
++                        attributes, key_buffer, key_buffer_size,
++                        alg );
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             operation->id = PSA_CRYPTO_CC3XX_DRIVER_ID;
+             status = cc3xx_aead_encrypt_setup(
+@@ -2232,6 +2462,15 @@ static inline psa_status_t psa_driver_wrapper_aead_decrypt_setup(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_AEAD)
++            operation->id = IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID;
++            status = ifx_mxcrypto_transparent_aead_decrypt_setup(
++                        &operation->ctx.ifx_mxcrypto_ctx,
++                        attributes, key_buffer, key_buffer_size,
++                        alg );
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             operation->id = PSA_CRYPTO_CC3XX_DRIVER_ID;
+             status = cc3xx_aead_decrypt_setup(
+@@ -2293,6 +2532,13 @@ static inline psa_status_t psa_driver_wrapper_aead_set_nonce(
+         /* Add cases for opaque driver here */
+ 
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_AEAD)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            return( ifx_mxcrypto_transparent_aead_set_nonce(
++                        &operation->ctx.ifx_mxcrypto_ctx,
++                        nonce, nonce_length ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_aead_set_nonce(
+@@ -2333,6 +2579,12 @@ static inline psa_status_t psa_driver_wrapper_aead_set_lengths(
+         /* Add cases for opaque driver here */
+ 
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_AEAD)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            return( ifx_mxcrypto_transparent_aead_set_lengths(
++                        &operation->ctx.ifx_mxcrypto_ctx,
++                        ad_length, plaintext_length ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_aead_set_lengths(
+@@ -2373,6 +2625,12 @@ static inline psa_status_t psa_driver_wrapper_aead_update_ad(
+         /* Add cases for opaque driver here */
+ 
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_AEAD)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            return( ifx_mxcrypto_transparent_aead_update_ad(
++                        &operation->ctx.ifx_mxcrypto_ctx,
++                        input, input_length ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_aead_update_ad(
+@@ -2418,6 +2676,13 @@ static inline psa_status_t psa_driver_wrapper_aead_update(
+         /* Add cases for opaque driver here */
+ 
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_AEAD)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            return( ifx_mxcrypto_transparent_aead_update(
++                        &operation->ctx.ifx_mxcrypto_ctx,
++                        input, input_length, output, output_size,
++                        output_length ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_aead_update(
+@@ -2469,6 +2734,13 @@ static inline psa_status_t psa_driver_wrapper_aead_finish(
+         /* Add cases for opaque driver here */
+ 
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_AEAD)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            return( ifx_mxcrypto_transparent_aead_finish(
++                        &operation->ctx.ifx_mxcrypto_ctx,
++                        ciphertext, ciphertext_size,
++                        ciphertext_length, tag, tag_size, tag_length ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_aead_finish(
+@@ -2540,6 +2812,15 @@ static inline psa_status_t psa_driver_wrapper_aead_verify(
+         /* Add cases for opaque driver here */
+ 
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_AEAD)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            return( ifx_mxcrypto_transparent_aead_verify(
++                    &operation->ctx.ifx_mxcrypto_ctx,
++                    plaintext,
++                    plaintext_size,
++                    plaintext_length,
++                    tag, tag_length ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_aead_verify(
+@@ -2579,6 +2860,11 @@ static inline psa_status_t psa_driver_wrapper_aead_abort(
+         /* Add cases for opaque driver here */
+ 
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_AEAD)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            return( ifx_mxcrypto_transparent_aead_abort(
++                &operation->ctx.ifx_mxcrypto_ctx ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_aead_abort(
+@@ -2629,6 +2915,14 @@ static inline psa_status_t psa_driver_wrapper_mac_compute(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_MAC)
++            status = ifx_mxcrypto_transparent_mac_compute(
++                attributes, key_buffer, key_buffer_size, alg,
++                input, input_length,
++                mac, mac_size, mac_length );
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_MAC */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_mac_compute(attributes, key_buffer, key_buffer_size, alg,
+                 input, input_length,
+@@ -2709,6 +3003,18 @@ static inline psa_status_t psa_driver_wrapper_mac_sign_setup(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_MAC)
++            status = ifx_mxcrypto_transparent_mac_sign_setup(
++                &operation->ctx.ifx_mxcrypto_ctx,
++                attributes,
++                key_buffer, key_buffer_size,
++                alg );
++            if( status == PSA_SUCCESS )
++                operation->id = IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID;
++
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_MAC */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_mac_sign_setup(
+                     &operation->ctx.cc3xx_driver_ctx,
+@@ -2796,6 +3102,18 @@ static inline psa_status_t psa_driver_wrapper_mac_verify_setup(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_MAC)
++            status = ifx_mxcrypto_transparent_mac_verify_setup(
++                &operation->ctx.ifx_mxcrypto_ctx,
++                attributes,
++                key_buffer, key_buffer_size,
++                alg );
++            if( status == PSA_SUCCESS )
++                operation->id = IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID;
++
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_MAC */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_mac_verify_setup(
+                 &operation->ctx.cc3xx_driver_ctx,
+@@ -2872,6 +3190,12 @@ static inline psa_status_t psa_driver_wrapper_mac_update(
+                         &operation->ctx.opaque_test_driver_ctx,
+                         input, input_length ) );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_MAC)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            return( ifx_mxcrypto_transparent_mac_update(
++                        &operation->ctx.ifx_mxcrypto_ctx,
++                        input, input_length ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_MAC */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return(cc3xx_mac_update(&operation->ctx.cc3xx_driver_ctx, input, input_length));
+@@ -2910,6 +3234,12 @@ static inline psa_status_t psa_driver_wrapper_mac_sign_finish(
+                         &operation->ctx.opaque_test_driver_ctx,
+                         mac, mac_size, mac_length ) );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_MAC)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            return( ifx_mxcrypto_transparent_mac_sign_finish(
++                        &operation->ctx.ifx_mxcrypto_ctx,
++                        mac, mac_size, mac_length ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_MAC */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return(cc3xx_mac_sign_finish(&operation->ctx.cc3xx_driver_ctx,
+@@ -2949,6 +3279,12 @@ static inline psa_status_t psa_driver_wrapper_mac_verify_finish(
+                         &operation->ctx.opaque_test_driver_ctx,
+                         mac, mac_length ) );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_MAC)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            return( ifx_mxcrypto_transparent_mac_verify_finish(
++                        &operation->ctx.ifx_mxcrypto_ctx,
++                        mac, mac_length ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_MAC */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return(cc3xx_mac_verify_finish(
+@@ -2982,6 +3318,11 @@ static inline psa_status_t psa_driver_wrapper_mac_abort(
+             return( mbedtls_test_opaque_mac_abort(
+                         &operation->ctx.opaque_test_driver_ctx ) );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_MAC)
++        case IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID:
++            return( ifx_mxcrypto_transparent_mac_abort(
++                        &operation->ctx.ifx_mxcrypto_ctx ) );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_MAC */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return(cc3xx_mac_abort(&operation->ctx.cc3xx_driver_ctx));
+@@ -3023,6 +3364,13 @@ static inline psa_status_t psa_driver_wrapper_asymmetric_encrypt(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_RSA_ENCRYPT)
++            status = ifx_mxcrypto_transparent_asymmetric_encrypt( attributes,
++                        key_buffer, key_buffer_size, alg, input, input_length,
++                        salt, salt_length, output, output_size, output_length);
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_RSA_ENCRYPT */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_asymmetric_encrypt( attributes,
+                                                key_buffer,
+@@ -3098,6 +3446,13 @@ static inline psa_status_t psa_driver_wrapper_asymmetric_decrypt(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* PSA_CRYPTO_DRIVER_TEST */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_RSA_DECRYPT)
++            status = ifx_mxcrypto_transparent_asymmetric_decrypt( attributes,
++                        key_buffer, key_buffer_size, alg, input, input_length,
++                        salt, salt_length, output, output_size, output_length);
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_RSA_DECRYPT */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_asymmetric_decrypt( attributes,
+                                                key_buffer,
+@@ -3210,6 +3565,14 @@ static inline psa_status_t psa_driver_wrapper_key_agreement(
+                     return( status );
+             }
+ #endif /* MBEDTLS_PSA_P256M_DRIVER_ENABLED */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_ECDH)
++            status = ifx_mxcrypto_transparent_key_agreement( attributes,
++                        key_buffer, key_buffer_size, alg,
++                        peer_key, peer_key_length,
++                        shared_secret, shared_secret_size, shared_secret_length );
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_ECDH */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+ 
+             /* Software Fallback */
+diff --git a/core/psa_crypto_driver_wrappers_no_static.c b/core/psa_crypto_driver_wrappers_no_static.c
+index 40145b9..7688bf2 100644
+--- a/core/psa_crypto_driver_wrappers_no_static.c
++++ b/core/psa_crypto_driver_wrappers_no_static.c
+@@ -69,6 +69,16 @@
+ #include "cc3xx.h"
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
+ 
++#if defined(IFX_PSA_MXCRYPTO_PRESENT)
++#ifndef PSA_CRYPTO_DRIVER_PRESENT
++#define PSA_CRYPTO_DRIVER_PRESENT
++#endif
++#ifndef PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT
++#define PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT
++#endif
++#include "ifx_mxcrypto_transparent_functions.h"
++#endif /* IFX_PSA_MXCRYPTO_PRESENT */
++
+ /* END-driver headers */
+ 
+ /* Auto-generated values depending on which drivers are registered.
+@@ -86,6 +96,9 @@ enum {
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+     PSA_CRYPTO_CC3XX_DRIVER_ID,
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
++#if defined(IFX_PSA_MXCRYPTO_PRESENT)
++    IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID,
++#endif /* IFX_PSA_MXCRYPTO_PRESENT */
+ };
+ 
+ /* END-driver id */
+@@ -214,7 +227,17 @@ psa_status_t psa_driver_wrapper_export_public_key(
+                 return( status );
+ #endif
+ 
+-
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_PUBLIC_KEY_EXPORT)
++            status = ifx_mxcrypto_transparent_export_public_key(
++                         attributes,
++                         key_buffer,
++                         key_buffer_size,
++                         data,
++                         data_size,
++                         data_length );
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_PUBLIC_KEY_EXPORT */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+             /* Fell through, meaning no accelerator supports this operation */
+             return( psa_export_public_key_internal( attributes,
+diff --git a/include/psa/crypto_driver_contexts_composites.h b/include/psa/crypto_driver_contexts_composites.h
+index 4068812..e45b535 100644
+--- a/include/psa/crypto_driver_contexts_composites.h
++++ b/include/psa/crypto_driver_contexts_composites.h
+@@ -32,6 +32,12 @@
+ /* Include the context structure definitions for those drivers that were
+  * declared during the autogeneration process. */
+ 
++#if defined(MBEDTLS_PSA_CRYPTO_DRIVERS)
++#if defined(IFX_PSA_MXCRYPTO_PRESENT)
++#include "ifx_mxcrypto_transparent_types.h"
++#endif /* IFX_PSA_MXCRYPTO_PRESENT */
++#endif /* MBEDTLS_PSA_CRYPTO_DRIVERS */
++
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+ #include "cc3xx_crypto_primitives_private.h"
+ #endif
+@@ -128,6 +134,9 @@ typedef union {
+     mbedtls_transparent_test_driver_mac_operation_t transparent_test_driver_ctx;
+     mbedtls_opaque_test_driver_mac_operation_t opaque_test_driver_ctx;
+ #endif
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_MAC)
++    ifx_mxcrypto_transparent_mac_operation_t ifx_mxcrypto_ctx;
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_MAC */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+     cc3xx_mac_operation_t cc3xx_driver_ctx;
+ #endif
+@@ -139,6 +148,9 @@ typedef union {
+ #if defined(PSA_CRYPTO_DRIVER_TEST)
+     mbedtls_transparent_test_driver_aead_operation_t transparent_test_driver_ctx;
+ #endif
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_AEAD)
++    ifx_mxcrypto_transparent_aead_operation_t ifx_mxcrypto_ctx;
++#endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+     cc3xx_aead_operation_t cc3xx_driver_ctx;
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
+diff --git a/include/psa/crypto_driver_contexts_primitives.h b/include/psa/crypto_driver_contexts_primitives.h
+index b2d1e9a..57a5438 100644
+--- a/include/psa/crypto_driver_contexts_primitives.h
++++ b/include/psa/crypto_driver_contexts_primitives.h
+@@ -31,6 +31,12 @@
+ /* Include the context structure definitions for those drivers that were
+  * declared during the autogeneration process. */
+ 
++#if defined(MBEDTLS_PSA_CRYPTO_DRIVERS)
++#if defined(IFX_PSA_MXCRYPTO_PRESENT)
++#include "ifx_mxcrypto_transparent_types.h"
++#endif /* IFX_PSA_MXCRYPTO_PRESENT */
++#endif /* MBEDTLS_PSA_CRYPTO_DRIVERS */
++
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+ #include "cc3xx_crypto_primitives_private.h"
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
+@@ -116,6 +122,11 @@ typedef union {
+ #if defined(PSA_CRYPTO_DRIVER_TEST)
+     mbedtls_transparent_test_driver_hash_operation_t test_driver_ctx;
+ #endif
++#if defined(MBEDTLS_PSA_CRYPTO_DRIVERS)
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_SHA)
++    ifx_mxcrypto_transparent_hash_operation_t ifx_mxcrypto_ctx;
++#endif /* IFX_PSA_MXCRYPTO_PRESENT */
++#endif /* MBEDTLS_PSA_CRYPTO_DRIVERS */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+     cc3xx_hash_operation_t cc3xx_driver_ctx;
+ #endif
+@@ -136,6 +147,11 @@ typedef union {
+     mbedtls_transparent_test_driver_cipher_operation_t transparent_test_driver_ctx;
+     mbedtls_opaque_test_driver_cipher_operation_t opaque_test_driver_ctx;
+ #endif
++#if defined(MBEDTLS_PSA_CRYPTO_DRIVERS)
++#if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_CIPHER)
++    ifx_mxcrypto_transparent_cipher_operation_t ifx_mxcrypto_ctx;
++#endif /* IFX_PSA_MXCRYPTO_PRESENT */
++#endif /* MBEDTLS_PSA_CRYPTO_DRIVERS */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+     cc3xx_cipher_operation_t cc3xx_driver_ctx;
+ #endif
+-- 
+2.47.0.windows.2
+

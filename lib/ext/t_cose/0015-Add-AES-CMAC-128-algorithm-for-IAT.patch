@@ -1,0 +1,110 @@
+From a5c44a93cce04891d5b0bc2ab831d406d6f4fb70 Mon Sep 17 00:00:00 2001
+From: "Kozemchuk Ivan (CSS ICW SW SCV BFS SFW / EE)"
+ <Ivan.Kozemchuk-EE@infineon.com>
+Date: Fri, 7 Nov 2025 19:13:14 +0200
+Subject: [PATCH 15/16] Add AES CMAC 128 algorithm for IAT
+
+---
+ crypto_adapters/t_cose_psa_crypto.c    | 20 ++++++++++++++++++--
+ inc/t_cose/t_cose_standard_constants.h | 12 ++++++++++++
+ src/t_cose_crypto.h                    |  9 +++++++++
+ 3 files changed, 39 insertions(+), 2 deletions(-)
+
+diff --git a/crypto_adapters/t_cose_psa_crypto.c b/crypto_adapters/t_cose_psa_crypto.c
+index d97ea96..646dc6f 100644
+--- a/crypto_adapters/t_cose_psa_crypto.c
++++ b/crypto_adapters/t_cose_psa_crypto.c
+@@ -756,6 +756,10 @@ static psa_algorithm_t cose_hmac_alg_id_to_psa(int32_t cose_hmac_alg_id)
+         return PSA_ALG_HMAC(PSA_ALG_SHA_384);
+     case T_COSE_ALGORITHM_HMAC512:
+         return PSA_ALG_HMAC(PSA_ALG_SHA_512);
++#ifdef T_COSE_ENABLE_AES_CMAC_128
++    case T_COSE_ALGORITHM_AES_CMAC_128:
++        return PSA_ALG_CMAC;
++#endif /* T_COSE_ENABLE_AES_CMAC_128 */
+     default:
+         return PSA_ALG_VENDOR_FLAG;
+     }
+@@ -814,7 +818,13 @@ t_cose_crypto_hmac_compute_setup(struct t_cose_crypto_hmac *hmac_ctx,
+     if((psa_alg != PSA_ALG_HMAC(PSA_ALG_SHA_256)) &&
+        (psa_alg != PSA_ALG_HMAC(PSA_ALG_SHA_384)) &&
+        (psa_alg != PSA_ALG_HMAC(PSA_ALG_SHA_512))) {
+-        return T_COSE_ERR_UNSUPPORTED_HMAC_ALG;
++#ifdef T_COSE_ENABLE_AES_CMAC_128
++        if (psa_alg != PSA_ALG_CMAC) {
++            return T_COSE_ERR_UNSUPPORTED_SIGNING_ALG;
++        }
++#else /* T_COSE_ENABLE_AES_CMAC_128 */
++        return T_COSE_ERR_UNSUPPORTED_SIGNING_ALG;
++#endif /* T_COSE_ENABLE_AES_CMAC_128 */
+     }
+ 
+     hmac_ctx->op_ctx = psa_mac_operation_init();
+@@ -890,7 +900,13 @@ t_cose_crypto_hmac_validate_setup(struct t_cose_crypto_hmac *hmac_ctx,
+     if((psa_alg != PSA_ALG_HMAC(PSA_ALG_SHA_256)) &&
+        (psa_alg != PSA_ALG_HMAC(PSA_ALG_SHA_384)) &&
+        (psa_alg != PSA_ALG_HMAC(PSA_ALG_SHA_512))) {
+-        return T_COSE_ERR_UNSUPPORTED_HMAC_ALG;
++#ifdef T_COSE_ENABLE_AES_CMAC_128
++        if (psa_alg != PSA_ALG_CMAC) {
++            return T_COSE_ERR_UNSUPPORTED_SIGNING_ALG;
++        }
++#else /* T_COSE_ENABLE_AES_CMAC_128 */
++        return T_COSE_ERR_UNSUPPORTED_SIGNING_ALG;
++#endif /* T_COSE_ENABLE_AES_CMAC_128 */
+     }
+ 
+     hmac_ctx->op_ctx = psa_mac_operation_init();
+diff --git a/inc/t_cose/t_cose_standard_constants.h b/inc/t_cose/t_cose_standard_constants.h
+index 65b2f99..2052955 100644
+--- a/inc/t_cose/t_cose_standard_constants.h
++++ b/inc/t_cose/t_cose_standard_constants.h
+@@ -419,6 +419,18 @@
+  */
+ #define T_COSE_ALGORITHM_HMAC512 7
+ 
++/**
++ * \def T_COSE_ALGORITHM_AES_CMAC_128
++ *
++ * \brief Indicates AES-CMAC with 128-bit key.
++ *
++ * This value is in the private use range of the
++ * [IANA COSE Registry](https://www.iana.org/assignments/cose/cose.xhtml).
++ *
++ * AES-CMAC is defined in [RFC 4493](https://datatracker.ietf.org/doc/html/rfc4493).
++ */
++#define T_COSE_ALGORITHM_AES_CMAC_128 -65536
++
+ 
+ /**
+  * \def T_COSE_ALGORITHM_SHORT_CIRCUIT_256
+diff --git a/src/t_cose_crypto.h b/src/t_cose_crypto.h
+index 944df74..7e7b02a 100644
+--- a/src/t_cose_crypto.h
++++ b/src/t_cose_crypto.h
+@@ -582,6 +582,11 @@ struct t_cose_crypto_hmac {
+  */
+ #define T_COSE_CRYPTO_HMAC512_TAG_SIZE   T_COSE_CRYPTO_SHA512_SIZE
+ 
++/**
++ * Size of the tag output for the AES-CMAC-128.
++ */
++#define T_COSE_CRYPTO_AES_CMAC_128_TAG_SIZE 16
++
+ /**
+  * Max size of the tag output for the HMAC operations. This works up to SHA3-512.
+  */
+@@ -814,6 +819,10 @@ static inline size_t t_cose_tag_size(int32_t cose_alg_id)
+             return T_COSE_CRYPTO_HMAC384_TAG_SIZE;
+         case T_COSE_ALGORITHM_HMAC512:
+             return T_COSE_CRYPTO_HMAC512_TAG_SIZE;
++#ifdef T_COSE_ENABLE_AES_CMAC_128
++        case T_COSE_ALGORITHM_AES_CMAC_128:
++            return T_COSE_CRYPTO_AES_CMAC_128_TAG_SIZE;
++#endif /* T_COSE_ENABLE_AES_CMAC_128 */
+         default:
+             return INT32_MAX;
+     }
+-- 
+2.52.0.windows.1
+

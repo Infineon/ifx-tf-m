@@ -1,0 +1,80 @@
+From d8617a85e28b7dfa703d3a05156dd0a1737e3c37 Mon Sep 17 00:00:00 2001
+From: Bohdan Hunko <Bohdan.Hunko@infineon.com>
+Date: Thu, 27 Nov 2025 20:58:55 +0200
+Subject: [PATCH 16/16] Fix compile warnings
+
+Signed-off-by: Bohdan Hunko <Bohdan.Hunko@infineon.com>
+---
+ test/t_cose_test.c | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/test/t_cose_test.c b/test/t_cose_test.c
+index 4b564da..bad8351 100644
+--- a/test/t_cose_test.c
++++ b/test/t_cose_test.c
+@@ -777,7 +777,7 @@ static enum t_cose_err_t run_test_sign_and_verify(uint32_t test_mess_options,
+ 
+     result = init_fixed_test_signing_key(cose_algorithm_id, &key_pair);
+     if(result) {
+-        return result + 1000;
++        return (enum t_cose_err_t)(result + 1000);
+     }
+ 
+     /* --- Start making COSE Sign1 object  --- */
+@@ -937,7 +937,7 @@ static struct test_case bad_parameters_tests_table[] = {
+ 
+     {T_COSE_TEST_BAD_PROTECTED, 0, T_COSE_ERR_PARAMETER_CBOR},
+ 
+-    {0, 0, 0}
++    {0, 0, T_COSE_SUCCESS}
+ };
+ 
+ 
+@@ -1007,7 +1007,7 @@ static struct test_case crit_tests_table[] = {
+     {T_COSE_TEST_TOO_MANY_TSTR_CRIT_LABLELS, 0, T_COSE_ERR_CRIT_PARAMETER},
+ #endif /* WE_HAVE_ADDED_STRING_LABELS */
+ 
+-    {0, 0, 0}
++    {0, 0, T_COSE_SUCCESS}
+ };
+ 
+ 
+@@ -1184,7 +1184,7 @@ static struct sign1_sample sign1_sample_inputs[] = {
+     /* 10. The smallest legal COSE_Sign1 using definite lengths */
+     { {(uint8_t[]){0x84, 0x43, 0xa1, 0x01, 0x26, 0xa0, 0x40, 0x40}, 8}, T_COSE_SUCCESS},
+     /* terminate the list */
+-    { {NULL, 0}, 0 },
++    { {NULL, 0}, T_COSE_SUCCESS },
+ };
+ 
+ #include "t_cose/t_cose_parameters.h"
+@@ -1589,7 +1589,7 @@ int32_t sign1_structure_decode_test(void)
+ 
+     for(int i = 0; !q_useful_buf_c_is_null(sign1_sample_inputs[i].CBOR); i++) {
+         if(i == 7) {
+-            result = 9;
++            result = T_COSE_ERR_CBOR_NOT_WELL_FORMED;
+         }
+ 
+         t_cose_sign1_verify_init(&verify1_ctx, T_COSE_OPT_DECODE_ONLY);
+@@ -2242,7 +2242,7 @@ int32_t crypto_context_test(void)
+ 
+ 
+     /* __2__ Change the value in the crypto context and see a failure  */
+-    crypto_context.test_error = 18; /* 18 just picked to make test work */
++    crypto_context.test_error = (enum t_cose_err_t)18; /* 18 just picked to make test work */
+     result = t_cose_sign_sign(&sign_ctx,
+                               NULL_Q_USEFUL_BUF_C,
+                               s_input_payload,
+@@ -2280,7 +2280,7 @@ int32_t crypto_context_test(void)
+ 
+ 
+     /* __4__ See failure when crypto context is set for failure  */
+-    crypto_context.test_error = 18; /* 18 just picked to make test work */
++    crypto_context.test_error = (enum t_cose_err_t)18; /* 18 just picked to make test work */
+     /* Run the signature verification */
+     result = t_cose_sign_verify(&verify_ctx,
+                                 /* COSE to verify */
+-- 
+2.52.0.windows.1
+

@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Roman Kytsun <roman.kytsun@infineon.com>
+Date: Tue, 24 Jun 2026 12:00:00 +0300
+Subject: [PATCH 18/18] Allow external framework path
+
+Make TF_PSA_CRYPTO_FRAMEWORK_DIR configurable so that the mbedtls-framework
+can be provided externally via MTB Library Manager instead of using the
+git submodule.
+
+Signed-off-by: Roman Kytsun <roman.kytsun@infineon.com>
+---
+ CMakeLists.txt | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 1234567..abcdefg 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -63,7 +63,10 @@ if(NOT DEFINED TF_PSA_CRYPTO_AS_SUBPROJECT)
+ endif()
+ 
+ # Set the project, Mbed TLS and framework root directory.
+-set(TF_PSA_CRYPTO_FRAMEWORK_DIR ${CMAKE_CURRENT_SOURCE_DIR}/framework)
++if(NOT DEFINED TF_PSA_CRYPTO_FRAMEWORK_DIR)
++    set(TF_PSA_CRYPTO_FRAMEWORK_DIR ${CMAKE_CURRENT_SOURCE_DIR}/framework
++        CACHE PATH "Path to mbedtls-framework")
++endif()
+ 
+ # Put the version numbers into relevant files
+ set(version_number_files
+-- 
+2.34.1

@@ -1,0 +1,759 @@
+From 9f7c8d2b58f543e5ac1fdc9f2d540102c1a5b7d1 Mon Sep 17 00:00:00 2001
+From: GitHub Copilot <copilot@openai.invalid>
+Date: Thu, 15 May 2026 12:00:00 +0000
+Subject: [PATCH] IFX: Add CRYPTOLITE transparent driver hooks
+
+Port the Infineon CRYPTOLITE transparent PSA driver hooks into the
+fetched tf-psa-crypto tree, following the existing MXCRYPTO integration
+order. The CRYPTOLITE dispatch branches are inserted immediately after
+MXCRYPTO in the wrapper paths and the required context/header plumbing is
+added for hash, cipher, AEAD, MAC, key generation, key agreement, and
+public key export.
+---
+ core/psa_crypto_driver_wrappers.h               | 329 ++++++++++++++++++++++++
+ core/psa_crypto_driver_wrappers_no_static.c     |  25 ++
+ include/psa/crypto_driver_contexts_composites.h |  12 +
+ include/psa/crypto_driver_contexts_primitives.h |  16 ++
+ 4 files changed, 382 insertions(+)
+
+diff --git a/core/psa_crypto_driver_wrappers.h b/core/psa_crypto_driver_wrappers.h
+index 6f2ab30..8155482 100644
+--- a/core/psa_crypto_driver_wrappers.h
++++ b/core/psa_crypto_driver_wrappers.h
+@@ -93,6 +93,16 @@
+ #include "ifx_mxcrypto_transparent_functions.h"
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT */
+ 
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT)
++#ifndef PSA_CRYPTO_DRIVER_PRESENT
++#define PSA_CRYPTO_DRIVER_PRESENT
++#endif
++#ifndef PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT
++#define PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT
++#endif
++#include "ifx_cryptolite_transparent_functions.h"
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT */
++
+ /* END-driver headers */
+ 
+ /* Auto-generated values depending on which drivers are registered.
+@@ -116,6 +126,9 @@ enum {
+ #if defined(IFX_PSA_MXCRYPTO_PRESENT)
+     IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID,
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT)
++    IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID,
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT */
+ };
+ 
+ /* END-driver id */
+@@ -239,6 +252,13 @@ static inline psa_status_t psa_driver_wrapper_sign_message(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_ECDSA_SIGN */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_ECDSA_SIGN)
++            status = ifx_cryptolite_transparent_sign_message( attributes,
++                        key_buffer, key_buffer_size, alg, input, input_length,
++                        signature, signature_size, signature_length );
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_ECDSA_SIGN */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+             return( psa_sign_message_builtin( attributes,
+                                               key_buffer,
+@@ -366,6 +386,13 @@ static inline psa_status_t psa_driver_wrapper_verify_message(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_ECDSA_VERIFY */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_ECDSA_VERIFY)
++            status = ifx_cryptolite_transparent_verify_message( attributes,
++                        key_buffer, key_buffer_size, alg, input, input_length,
++                        signature, signature_length );
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_ECDSA_VERIFY */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+             return( psa_verify_message_builtin( attributes,
+                                                 key_buffer,
+@@ -496,6 +523,13 @@ static inline psa_status_t psa_driver_wrapper_sign_hash(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_ECDSA_SIGN */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_ECDSA_SIGN)
++            status = ifx_cryptolite_transparent_sign_hash( attributes,
++                        key_buffer, key_buffer_size, alg, hash, hash_length,
++                        signature, signature_size, signature_length );
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_ECDSA_SIGN */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+             /* Fell through, meaning no accelerator supports this operation */
+             return( psa_sign_hash_builtin( attributes,
+@@ -623,6 +657,13 @@ static inline psa_status_t psa_driver_wrapper_verify_hash(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_ECDSA_VERIFY */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_ECDSA_VERIFY)
++            status = ifx_cryptolite_transparent_verify_hash( attributes,
++                        key_buffer, key_buffer_size, alg, hash, hash_length,
++                        signature, signature_length );
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_ECDSA_VERIFY */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+ 
+             return( psa_verify_hash_builtin( attributes,
+@@ -1027,6 +1068,13 @@ static inline psa_status_t psa_driver_wrapper_generate_key(
+                 if( status != PSA_ERROR_NOT_SUPPORTED )
+                     break;
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_KEY_GENERATION */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_KEY_GENERATION)
++                status = ifx_cryptolite_transparent_generate_key(
++                    attributes, key_buffer, key_buffer_size,
++                    key_buffer_length );
++                if( status != PSA_ERROR_NOT_SUPPORTED )
++                    break;
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_KEY_GENERATION */
+             }
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+ 
+@@ -1400,6 +1448,22 @@ static inline psa_status_t psa_driver_wrapper_cipher_encrypt(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_CIPHER */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_CIPHER)
++            status = ifx_cryptolite_transparent_cipher_encrypt( attributes,
++                                                                key_buffer,
++                                                                key_buffer_size,
++                                                                alg,
++                                                                iv,
++                                                                iv_length,
++                                                                input,
++                                                                input_length,
++                                                                output,
++                                                                output_size,
++                                                                output_length );
++
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_CIPHER */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_cipher_encrypt( attributes,
+                                            key_buffer,
+@@ -1540,6 +1604,20 @@ static inline psa_status_t psa_driver_wrapper_cipher_decrypt(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_CIPHER */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_CIPHER)
++            status = ifx_cryptolite_transparent_cipher_decrypt( attributes,
++                                                                key_buffer,
++                                                                key_buffer_size,
++                                                                alg,
++                                                                input,
++                                                                input_length,
++                                                                output,
++                                                                output_size,
++                                                                output_length );
++
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_CIPHER */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_cipher_decrypt( attributes,
+                                            key_buffer,
+@@ -1663,6 +1741,19 @@ static inline psa_status_t psa_driver_wrapper_cipher_encrypt_setup(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_CIPHER */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_CIPHER)
++            status = ifx_cryptolite_transparent_cipher_encrypt_setup(
++                &operation->ctx.ifx_cryptolite_ctx,
++                attributes,
++                key_buffer,
++                key_buffer_size,
++                alg );
++            if( status == PSA_SUCCESS )
++                operation->id = IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID;
++
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_CIPHER */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_cipher_encrypt_setup(
+                 &operation->ctx.cc3xx_driver_ctx,
+@@ -1783,6 +1874,19 @@ static inline psa_status_t psa_driver_wrapper_cipher_decrypt_setup(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_CIPHER */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_CIPHER)
++            status = ifx_cryptolite_transparent_cipher_decrypt_setup(
++                &operation->ctx.ifx_cryptolite_ctx,
++                attributes,
++                key_buffer,
++                key_buffer_size,
++                alg );
++            if( status == PSA_SUCCESS )
++                operation->id = IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID;
++
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_CIPHER */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_cipher_decrypt_setup(
+                 &operation->ctx.cc3xx_driver_ctx,
+@@ -1893,6 +1997,12 @@ static inline psa_status_t psa_driver_wrapper_cipher_set_iv(
+                         &operation->ctx.ifx_mxcrypto_ctx,
+                         iv, iv_length ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_CIPHER */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_CIPHER)
++        case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++            return( ifx_cryptolite_transparent_cipher_set_iv(
++                        &operation->ctx.ifx_cryptolite_ctx,
++                        iv, iv_length ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_CIPHER */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_cipher_set_iv(
+@@ -1958,6 +2068,13 @@ static inline psa_status_t psa_driver_wrapper_cipher_update(
+                         input, input_length,
+                         output, output_size, output_length ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_CIPHER */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_CIPHER)
++        case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++            return( ifx_cryptolite_transparent_cipher_update(
++                        &operation->ctx.ifx_cryptolite_ctx,
++                        input, input_length,
++                        output, output_size, output_length ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_CIPHER */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_cipher_update(
+@@ -2019,6 +2136,12 @@ static inline psa_status_t psa_driver_wrapper_cipher_finish(
+                         &operation->ctx.ifx_mxcrypto_ctx,
+                         output, output_size, output_length ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_CIPHER */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_CIPHER)
++        case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++            return( ifx_cryptolite_transparent_cipher_finish(
++                        &operation->ctx.ifx_cryptolite_ctx,
++                        output, output_size, output_length ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_CIPHER */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_cipher_finish(
+@@ -2080,6 +2203,11 @@ static inline psa_status_t psa_driver_wrapper_cipher_abort(
+             return( ifx_mxcrypto_transparent_cipher_abort(
+                         &operation->ctx.ifx_mxcrypto_ctx ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_CIPHER */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_CIPHER)
++        case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++            return( ifx_cryptolite_transparent_cipher_abort(
++                        &operation->ctx.ifx_cryptolite_ctx ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_CIPHER */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             status = cc3xx_cipher_abort(
+@@ -2150,6 +2278,14 @@ static inline psa_status_t psa_driver_wrapper_hash_compute(
+         return( status );
+     }
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_SHA */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_SHA)
++    status = ifx_cryptolite_transparent_hash_compute(
++                alg, input, input_length, hash, hash_size, hash_length );
++    if( status != PSA_ERROR_NOT_SUPPORTED )
++    {
++        return( status );
++    }
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_SHA */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+ 
+     /* If software fallback is compiled in, try fallback */
+@@ -2226,6 +2362,20 @@ static inline psa_status_t psa_driver_wrapper_hash_setup(
+         return( status );
+     }
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_SHA */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_SHA)
++    status = ifx_cryptolite_transparent_hash_setup(
++                &operation->ctx.ifx_cryptolite_ctx, alg );
++
++    if( status == PSA_SUCCESS )
++    {
++        operation->id = IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID;
++    }
++
++    if( status != PSA_ERROR_NOT_SUPPORTED )
++    {
++        return( status );
++    }
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_SHA */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+ 
+     /* If software fallback is compiled in, try fallback */
+@@ -2264,6 +2414,13 @@ static inline psa_status_t psa_driver_wrapper_hash_clone(
+                     &source_operation->ctx.ifx_mxcrypto_ctx,
+                     &target_operation->ctx.ifx_mxcrypto_ctx ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_SHA */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_SHA)
++    case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++        target_operation->id = IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID;
++        return( ifx_cryptolite_transparent_hash_clone(
++            &source_operation->ctx.ifx_cryptolite_ctx,
++            &target_operation->ctx.ifx_cryptolite_ctx ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_SHA */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+ #if defined(PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT)
+ #if defined(PSA_CRYPTO_DRIVER_TEST)
+@@ -2315,6 +2472,12 @@ static inline psa_status_t psa_driver_wrapper_hash_update(
+                         &operation->ctx.ifx_mxcrypto_ctx,
+                         input, input_length ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_SHA */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_SHA)
++        case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++            return( ifx_cryptolite_transparent_hash_update(
++                        &operation->ctx.ifx_cryptolite_ctx,
++                        input, input_length ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_SHA */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+ #if defined(PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT)
+ #if defined(PSA_CRYPTO_DRIVER_TEST)
+@@ -2357,6 +2520,12 @@ static inline psa_status_t psa_driver_wrapper_hash_finish(
+                         &operation->ctx.ifx_mxcrypto_ctx,
+                         hash, hash_size, hash_length ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_SHA */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_SHA)
++        case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++            return( ifx_cryptolite_transparent_hash_finish(
++                        &operation->ctx.ifx_cryptolite_ctx,
++                        hash, hash_size, hash_length ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_SHA */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+ #if defined(PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT)
+ #if defined(PSA_CRYPTO_DRIVER_TEST)
+@@ -2404,6 +2573,11 @@ static inline psa_status_t psa_driver_wrapper_hash_abort(
+             return( ifx_mxcrypto_transparent_hash_abort(
+                         &operation->ctx.ifx_mxcrypto_ctx ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_SHA */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_SHA)
++        case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++            return( ifx_cryptolite_transparent_hash_abort(
++                        &operation->ctx.ifx_cryptolite_ctx ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_SHA */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+ #if defined(PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT)
+ #if defined(PSA_CRYPTO_DRIVER_TEST)
+@@ -2615,6 +2789,17 @@ static inline psa_status_t psa_driver_wrapper_aead_encrypt(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_AEAD)
++            status = ifx_cryptolite_transparent_aead_encrypt(
++                         attributes, key_buffer, key_buffer_size,
++                         alg,
++                         nonce, nonce_length,
++                         additional_data, additional_data_length,
++                         plaintext, plaintext_length,
++                         ciphertext, ciphertext_size, ciphertext_length );
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_aead_encrypt(
+                         attributes, key_buffer, key_buffer_size,
+@@ -2726,6 +2911,17 @@ static inline psa_status_t psa_driver_wrapper_aead_decrypt(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_AEAD)
++            status = ifx_cryptolite_transparent_aead_decrypt(
++                        attributes, key_buffer, key_buffer_size,
++                        alg,
++                        nonce, nonce_length,
++                        additional_data, additional_data_length,
++                        ciphertext, ciphertext_length,
++                        plaintext, plaintext_size, plaintext_length );
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_aead_decrypt(
+                         attributes, key_buffer, key_buffer_size,
+@@ -2834,6 +3030,17 @@ static inline psa_status_t psa_driver_wrapper_aead_encrypt_setup(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_AEAD)
++            status = ifx_cryptolite_transparent_aead_encrypt_setup(
++                        &operation->ctx.ifx_cryptolite_ctx,
++                        attributes, key_buffer, key_buffer_size,
++                        alg );
++            if( status == PSA_SUCCESS )
++                operation->id = IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID;
++
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             operation->id = PSA_CRYPTO_CC3XX_DRIVER_ID;
+             status = cc3xx_aead_encrypt_setup(
+@@ -2933,6 +3140,17 @@ static inline psa_status_t psa_driver_wrapper_aead_decrypt_setup(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_AEAD)
++            status = ifx_cryptolite_transparent_aead_decrypt_setup(
++                        &operation->ctx.ifx_cryptolite_ctx,
++                        attributes, key_buffer, key_buffer_size,
++                        alg );
++            if( status == PSA_SUCCESS )
++                operation->id = IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID;
++
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             operation->id = PSA_CRYPTO_CC3XX_DRIVER_ID;
+             status = cc3xx_aead_decrypt_setup(
+@@ -3030,6 +3248,12 @@ static inline psa_status_t psa_driver_wrapper_aead_set_nonce(
+                         &operation->ctx.ifx_mxcrypto_ctx,
+                         nonce, nonce_length ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_AEAD)
++        case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++            return( ifx_cryptolite_transparent_aead_set_nonce(
++                        &operation->ctx.ifx_cryptolite_ctx,
++                        nonce, nonce_length ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_aead_set_nonce(
+@@ -3084,6 +3308,12 @@ static inline psa_status_t psa_driver_wrapper_aead_set_lengths(
+                         &operation->ctx.ifx_mxcrypto_ctx,
+                         ad_length, plaintext_length ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_AEAD)
++    case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++        return( ifx_cryptolite_transparent_aead_set_lengths(
++            &operation->ctx.ifx_cryptolite_ctx,
++            ad_length, plaintext_length ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_aead_set_lengths(
+@@ -3138,6 +3368,12 @@ static inline psa_status_t psa_driver_wrapper_aead_update_ad(
+                         &operation->ctx.ifx_mxcrypto_ctx,
+                         input, input_length ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_AEAD)
++    case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++        return( ifx_cryptolite_transparent_aead_update_ad(
++            &operation->ctx.ifx_cryptolite_ctx,
++            input, input_length ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_aead_update_ad(
+@@ -3201,6 +3437,13 @@ static inline psa_status_t psa_driver_wrapper_aead_update(
+                         input, input_length, output, output_size,
+                         output_length ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_AEAD)
++    case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++        return( ifx_cryptolite_transparent_aead_update(
++            &operation->ctx.ifx_cryptolite_ctx,
++            input, input_length, output, output_size,
++            output_length ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_aead_update(
+@@ -3271,6 +3514,13 @@ static inline psa_status_t psa_driver_wrapper_aead_finish(
+                         ciphertext, ciphertext_size,
+                         ciphertext_length, tag, tag_size, tag_length ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_AEAD)
++    case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++        return( ifx_cryptolite_transparent_aead_finish(
++            &operation->ctx.ifx_cryptolite_ctx,
++            ciphertext, ciphertext_size,
++            ciphertext_length, tag, tag_size, tag_length ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_aead_finish(
+@@ -3362,6 +3612,15 @@ static inline psa_status_t psa_driver_wrapper_aead_verify(
+                     plaintext_length,
+                     tag, tag_length ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_AEAD)
++    case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++        return( ifx_cryptolite_transparent_aead_verify(
++            &operation->ctx.ifx_cryptolite_ctx,
++            plaintext,
++            plaintext_size,
++            plaintext_length,
++            tag, tag_length ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_aead_verify(
+@@ -3412,6 +3671,11 @@ static inline psa_status_t psa_driver_wrapper_aead_abort(
+             return( ifx_mxcrypto_transparent_aead_abort(
+                 &operation->ctx.ifx_mxcrypto_ctx ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_AEAD)
++        case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++            return( ifx_cryptolite_transparent_aead_abort(
++                &operation->ctx.ifx_cryptolite_ctx ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return( cc3xx_aead_abort(
+@@ -3470,6 +3734,14 @@ static inline psa_status_t psa_driver_wrapper_mac_compute(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_MAC */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_MAC)
++            status = ifx_cryptolite_transparent_mac_compute(
++                attributes, key_buffer, key_buffer_size, alg,
++                input, input_length,
++                mac, mac_size, mac_length );
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_MAC */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_mac_compute(attributes, key_buffer, key_buffer_size, alg,
+                 input, input_length,
+@@ -3579,6 +3851,18 @@ static inline psa_status_t psa_driver_wrapper_mac_sign_setup(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_MAC */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_MAC)
++            status = ifx_cryptolite_transparent_mac_sign_setup(
++                &operation->ctx.ifx_cryptolite_ctx,
++                attributes,
++                key_buffer, key_buffer_size,
++                alg );
++            if( status == PSA_SUCCESS )
++                operation->id = IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID;
++
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_MAC */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_mac_sign_setup(
+                     &operation->ctx.cc3xx_driver_ctx,
+@@ -3697,6 +3981,18 @@ static inline psa_status_t psa_driver_wrapper_mac_verify_setup(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_MAC */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_MAC)
++            status = ifx_cryptolite_transparent_mac_verify_setup(
++                &operation->ctx.ifx_cryptolite_ctx,
++                attributes,
++                key_buffer, key_buffer_size,
++                alg );
++            if( status == PSA_SUCCESS )
++                operation->id = IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID;
++
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_MAC */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+             status = cc3xx_mac_verify_setup(
+                 &operation->ctx.cc3xx_driver_ctx,
+@@ -3806,6 +4102,12 @@ static inline psa_status_t psa_driver_wrapper_mac_update(
+                         &operation->ctx.ifx_mxcrypto_ctx,
+                         input, input_length ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_MAC */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_MAC)
++        case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++            return( ifx_cryptolite_transparent_mac_update(
++                        &operation->ctx.ifx_cryptolite_ctx,
++                        input, input_length ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_MAC */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return(cc3xx_mac_update(&operation->ctx.cc3xx_driver_ctx, input, input_length));
+@@ -3859,6 +4161,12 @@ static inline psa_status_t psa_driver_wrapper_mac_sign_finish(
+                         &operation->ctx.ifx_mxcrypto_ctx,
+                         mac, mac_size, mac_length ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_MAC */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_MAC)
++        case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++            return( ifx_cryptolite_transparent_mac_sign_finish(
++                        &operation->ctx.ifx_cryptolite_ctx,
++                        mac, mac_size, mac_length ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_MAC */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return(cc3xx_mac_sign_finish(&operation->ctx.cc3xx_driver_ctx,
+@@ -3912,6 +4220,12 @@ static inline psa_status_t psa_driver_wrapper_mac_verify_finish(
+                         &operation->ctx.ifx_mxcrypto_ctx,
+                         mac, mac_length ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_MAC */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_MAC)
++        case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++            return( ifx_cryptolite_transparent_mac_verify_finish(
++                        &operation->ctx.ifx_cryptolite_ctx,
++                        mac, mac_length ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_MAC */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return(cc3xx_mac_verify_finish(
+@@ -3960,6 +4274,11 @@ static inline psa_status_t psa_driver_wrapper_mac_abort(
+             return( ifx_mxcrypto_transparent_mac_abort(
+                         &operation->ctx.ifx_mxcrypto_ctx ) );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_MAC */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_MAC)
++        case IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID:
++            return( ifx_cryptolite_transparent_mac_abort(
++                        &operation->ctx.ifx_cryptolite_ctx ) );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_MAC */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+         case PSA_CRYPTO_CC3XX_DRIVER_ID:
+             return(cc3xx_mac_abort(&operation->ctx.cc3xx_driver_ctx));
+@@ -4220,6 +4539,14 @@ static inline psa_status_t psa_driver_wrapper_key_agreement(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_ECDH */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_ECDH)
++            status = ifx_cryptolite_transparent_key_agreement( attributes,
++                        key_buffer, key_buffer_size, alg,
++                        peer_key, peer_key_length,
++                        shared_secret, shared_secret_size, shared_secret_length );
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_ECDH */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+ 
+             /* Software Fallback */
+diff --git a/core/psa_crypto_driver_wrappers_no_static.c b/core/psa_crypto_driver_wrappers_no_static.c
+index 857602f..37ef13a 100644
+--- a/core/psa_crypto_driver_wrappers_no_static.c
++++ b/core/psa_crypto_driver_wrappers_no_static.c
+@@ -79,6 +79,16 @@
+ #include "ifx_mxcrypto_transparent_functions.h"
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT */
+ 
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT)
++#ifndef PSA_CRYPTO_DRIVER_PRESENT
++#define PSA_CRYPTO_DRIVER_PRESENT
++#endif
++#ifndef PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT
++#define PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT
++#endif
++#include "ifx_cryptolite_transparent_functions.h"
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT */
++
+ /* END-driver headers */
+ 
+ /* Auto-generated values depending on which drivers are registered.
+@@ -99,6 +109,9 @@ enum {
+ #if defined(IFX_PSA_MXCRYPTO_PRESENT)
+     IFX_MXCRYPTO_TRANSPARENT_DRIVER_ID,
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT)
++    IFX_CRYPTOLITE_TRANSPARENT_DRIVER_ID,
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT */
+ };
+ 
+ /* END-driver id */
+@@ -245,6 +258,18 @@ psa_status_t psa_driver_wrapper_export_public_key(
+             if( status != PSA_ERROR_NOT_SUPPORTED )
+                 return( status );
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_PUBLIC_KEY_EXPORT */
++
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_PUBLIC_KEY_EXPORT)
++            status = ifx_cryptolite_transparent_export_public_key(
++                         attributes,
++                         key_buffer,
++                         key_buffer_size,
++                         data,
++                         data_size,
++                         data_length );
++            if( status != PSA_ERROR_NOT_SUPPORTED )
++                return( status );
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_PUBLIC_KEY_EXPORT */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+             /* Fell through, meaning no accelerator supports this operation */
+             return( psa_export_public_key_internal( attributes,
+diff --git a/include/psa/crypto_driver_contexts_composites.h b/include/psa/crypto_driver_contexts_composites.h
+index c9eca96..516aa90 100644
+--- a/include/psa/crypto_driver_contexts_composites.h
++++ b/include/psa/crypto_driver_contexts_composites.h
+@@ -44,6 +44,12 @@
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT */
+ #endif /* MBEDTLS_PSA_CRYPTO_DRIVERS */
+ 
++#if defined(MBEDTLS_PSA_CRYPTO_DRIVERS)
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT)
++#include "ifx_cryptolite_transparent_types.h"
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT */
++#endif /* MBEDTLS_PSA_CRYPTO_DRIVERS */
++
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+ #include "cc3xx_crypto_primitives_private.h"
+ #endif
+@@ -146,6 +152,9 @@ typedef union {
+ #if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_MAC)
+     ifx_mxcrypto_transparent_mac_operation_t ifx_mxcrypto_ctx;
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_MAC */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_MAC)
++    ifx_cryptolite_transparent_mac_operation_t ifx_cryptolite_ctx;
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_MAC */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+     cc3xx_mac_operation_t cc3xx_driver_ctx;
+ #endif
+@@ -163,6 +172,9 @@ typedef union {
+ #if defined(IFX_PSA_MXCRYPTO_PRESENT) && defined(IFX_PSA_MXCRYPTO_AEAD)
+     ifx_mxcrypto_transparent_aead_operation_t ifx_mxcrypto_ctx;
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT && IFX_PSA_MXCRYPTO_AEAD */
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_AEAD)
++    ifx_cryptolite_transparent_aead_operation_t ifx_cryptolite_ctx;
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_AEAD */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+     cc3xx_aead_operation_t cc3xx_driver_ctx;
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
+diff --git a/include/psa/crypto_driver_contexts_primitives.h b/include/psa/crypto_driver_contexts_primitives.h
+index 2b03097..aaf916c 100644
+--- a/include/psa/crypto_driver_contexts_primitives.h
++++ b/include/psa/crypto_driver_contexts_primitives.h
+@@ -43,6 +43,12 @@
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT */
+ #endif /* MBEDTLS_PSA_CRYPTO_DRIVERS */
+ 
++#if defined(MBEDTLS_PSA_CRYPTO_DRIVERS)
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT)
++#include "ifx_cryptolite_transparent_types.h"
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT */
++#endif /* MBEDTLS_PSA_CRYPTO_DRIVERS */
++
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+ #include "cc3xx_crypto_primitives_private.h"
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
+@@ -138,6 +144,11 @@ typedef union {
+     ifx_mxcrypto_transparent_hash_operation_t ifx_mxcrypto_ctx;
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT */
+ #endif /* MBEDTLS_PSA_CRYPTO_DRIVERS */
++#if defined(MBEDTLS_PSA_CRYPTO_DRIVERS)
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_SHA)
++    ifx_cryptolite_transparent_hash_operation_t ifx_cryptolite_ctx;
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_SHA */
++#endif /* MBEDTLS_PSA_CRYPTO_DRIVERS */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+     cc3xx_hash_operation_t cc3xx_driver_ctx;
+ #endif
+@@ -168,6 +179,11 @@ typedef union {
+     ifx_mxcrypto_transparent_cipher_operation_t ifx_mxcrypto_ctx;
+ #endif /* IFX_PSA_MXCRYPTO_PRESENT */
+ #endif /* MBEDTLS_PSA_CRYPTO_DRIVERS */
++#if defined(MBEDTLS_PSA_CRYPTO_DRIVERS)
++#if defined(IFX_PSA_CRYPTOLITE_PRESENT) && defined(IFX_PSA_CRYPTOLITE_CIPHER)
++    ifx_cryptolite_transparent_cipher_operation_t ifx_cryptolite_ctx;
++#endif /* IFX_PSA_CRYPTOLITE_PRESENT && IFX_PSA_CRYPTOLITE_CIPHER */
++#endif /* MBEDTLS_PSA_CRYPTO_DRIVERS */
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+     cc3xx_cipher_operation_t cc3xx_driver_ctx;
+ #endif
+-- 
+2.47.0.windows.2

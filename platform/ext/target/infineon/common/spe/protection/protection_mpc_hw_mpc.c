@@ -1,0 +1,1135 @@
+/*
+ * (c) 2024-2026, Infineon Technologies AG, or an affiliate of Infineon
+ * Technologies AG. All rights reserved.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
+ */
+
+#include "config_impl.h"
+#include "config_tfm.h"
+#include "cy_mpc.h"
+#include "fih.h"
+#include "region_defs.h"
+#include "protection_data_common.h"
+#include "protection_types.h"
+#include "protection_utils.h"
+#include "protection_regions_cfg.h"
+#include "protection_mpc_api.h"
+#if IFX_SE_IPC_SERVICE_FULL || IFX_SE_IPC_SERVICE_BASE
+#include "protection_mpc_sert.h"
+#endif /* IFX_SE_IPC_SERVICE_FULL || IFX_SE_IPC_SERVICE_BASE */
+#include "region.h"
+#include "ifx_platform_mailbox.h"
+#include "ifx_regions.h"
+#include "ifx_utils.h"
+#include "tfm_hal_isolation.h"
+#include "utilities.h"
+#include "coverity_check.h"
+#include "tfm_utils.h"
+
+ifx_mpc_region_config_t ifx_fixed_mpc_static_config[IFX_MAX_FIXED_CONFIGS];
+uint32_t ifx_fixed_mpc_static_config_count = 0;
+
+FIH_RET_TYPE(enum tfm_hal_status_t) ifx_mpc_fill_fixed_config(void)
+{
+    uint32_t idx = 0;
+
+    /* Following MPC configs only change the PC mask thus if
+     * IFX_ISOLATION_PC_SWITCHING is OFF, then PC mask will be the same, so no
+     * need to reconfigure. */
+#if IFX_ISOLATION_PC_SWITCHING
+#if (TFM_ISOLATION_LEVEL == 2) && (CONFIG_TFM_AROT_PRESENT == 1)
+    /* ARoT RW, ZI and stack as one region */
+    ifx_fixed_mpc_static_config[idx++] =
+    (ifx_mpc_region_config_t){
+        .address    = (uint32_t)&REGION_NAME(Image$$, TFM_APP_RW_STACK_START, $$Base),
+        .size       = (uint32_t)&REGION_NAME(Image$$, TFM_APP_RW_STACK_END, $$Base) -
+                      (uint32_t)&REGION_NAME(Image$$, TFM_APP_RW_STACK_START, $$Base),
+        .ns_mask    = IFX_PC_NONE, /**< All secure */
+        .r_mask     = IFX_PC_TFM_SPM | IFX_PC_TFM_PROT | IFX_PC_TFM_AROT,
+        .w_mask     = IFX_PC_TFM_SPM | IFX_PC_TFM_PROT | IFX_PC_TFM_AROT,
+    };
+#endif /* (TFM_ISOLATION_LEVEL == 2) && (CONFIG_TFM_AROT_PRESENT == 1) */
+
+#if (TFM_ISOLATION_LEVEL == 2)
+    /* PRoT RW, ZI and stack as one region */
+    ifx_fixed_mpc_static_config[idx++] =
+    (ifx_mpc_region_config_t){
+        .address    = (uint32_t)&REGION_NAME(Image$$, TFM_PSA_RW_STACK_START, $$Base),
+        .size       = (uint32_t)&REGION_NAME(Image$$, TFM_PSA_RW_STACK_END, $$Base) -
+                      (uint32_t)&REGION_NAME(Image$$, TFM_PSA_RW_STACK_START, $$Base),
+        .ns_mask    = IFX_PC_NONE, /**< All secure */
+        .r_mask     = IFX_PC_TFM_SPM | IFX_PC_TFM_PROT,
+        .w_mask     = IFX_PC_TFM_SPM | IFX_PC_TFM_PROT,
+    };
+#endif /* (TFM_ISOLATION_LEVEL == 2) */
+
+#ifdef CONFIG_TFM_PARTITION_META
+    /* RW, ZI and stack as one region */
+    ifx_fixed_mpc_static_config[idx++] =
+    (ifx_mpc_region_config_t){
+            .address    = (uint32_t)&REGION_NAME(Image$$, TFM_SPM_RW_OTHER_RO_START, $$Base),
+            .size       = (uint32_t)&REGION_NAME(Image$$, TFM_SPM_RW_OTHER_RO_END, $$Base) -
+                          (uint32_t)&REGION_NAME(Image$$, TFM_SPM_RW_OTHER_RO_START, $$Base),
+            .ns_mask    = IFX_PC_NONE, /**< All secure */
+            .r_mask     = IFX_PC_TFM_SPM | IFX_PC_TFM_PROT | IFX_PC_TFM_AROT | IFX_PC_TZ_NSPE,
+            .w_mask     = IFX_PC_TFM_SPM,
+    };
+#endif /* CONFIG_TFM_PARTITION_META */
+
+#if TFM_ISOLATION_LEVEL == 3
+#if TEST_NS_IFX_CODE_COVERAGE
+    /* coverage linker region - secure PCs have RW access */
+    ifx_fixed_mpc_static_config[idx++] =
+    (ifx_mpc_region_config_t){
+            .address    = (uint32_t)&REGION_NAME(Image$$, IFX_CODE_COVERAGE_START, $$Base),
+            .size       = (uint32_t)&REGION_NAME(Image$$, IFX_CODE_COVERAGE_END, $$Base) -
+                          (uint32_t)&REGION_NAME(Image$$, IFX_CODE_COVERAGE_START, $$Base),
+            .ns_mask    = IFX_PC_NONE, /**< All secure */
+            .r_mask     = IFX_PC_TFM_SPM | IFX_PC_TFM_PROT | IFX_PC_TFM_AROT | IFX_PC_TZ_NSPE,
+            .w_mask     = IFX_PC_TFM_SPM | IFX_PC_TFM_PROT | IFX_PC_TFM_AROT | IFX_PC_TZ_NSPE,
+    };
+#endif /* TEST_NS_IFX_CODE_COVERAGE */
+#endif /* TFM_ISOLATION_LEVEL == 3 */
+
+#ifdef CONFIG_TFM_USE_TRUSTZONE
+    ifx_fixed_mpc_static_config[idx++] =
+    (ifx_mpc_region_config_t){
+        .address    = (uint32_t)&REGION_NAME(Image$$, ER_VENEER, $$Base),
+        .size       = (uint32_t)&REGION_NAME(Image$$, VENEER_ALIGN, $$Limit) -
+                      (uint32_t)&REGION_NAME(Image$$, ER_VENEER, $$Base),
+        .ns_mask    = IFX_PC_NONE, /**< All secure */
+        .r_mask     = IFX_PC_TFM_SPM | IFX_PC_TFM_PROT | IFX_PC_TZ_NSPE,
+        .w_mask     = IFX_PC_NONE,
+    };
+
+    /* Unprivileged NS Agent TZ code region for TFM image with enabled Default PC (with SPM) + PRoT + ARoT  */
+    ifx_fixed_mpc_static_config[idx++] =
+    (ifx_mpc_region_config_t){
+        .address    = (uint32_t)&REGION_NAME(Image$$, TFM_NS_AGENT_TZ_CODE_START, $$RO$$Base),
+        .size       = (uint32_t)&REGION_NAME(Image$$, TFM_NS_AGENT_TZ_CODE_END, $$RO$$Limit) -
+                      (uint32_t)&REGION_NAME(Image$$, TFM_NS_AGENT_TZ_CODE_START, $$RO$$Base),
+        .ns_mask    = IFX_PC_NONE, /**< All secure */
+        .r_mask     = IFX_PC_TFM_SPM | IFX_PC_TFM_PROT | IFX_PC_TFM_AROT | IFX_PC_TZ_NSPE,
+        .w_mask     = IFX_PC_NONE, /**< No write to code, R/O data */
+    };
+
+    /* Unprivileged Secure code region for TFM image with enabled Default PC (with SPM) + PRoT + ARoT  */
+    ifx_fixed_mpc_static_config[idx++] =
+    (ifx_mpc_region_config_t){
+        .address    = (uint32_t)&REGION_NAME(Image$$, TFM_UNPRIV_BASE_CODE_START, $$RO$$Base),
+        .size       = (uint32_t)&REGION_NAME(Image$$, TFM_UNPRIV_BASE_CODE_END, $$RO$$Limit) -
+                      (uint32_t)&REGION_NAME(Image$$, TFM_UNPRIV_BASE_CODE_START, $$RO$$Base),
+        .ns_mask    = IFX_PC_NONE, /**< All secure */
+        .r_mask     = IFX_PC_TFM_SPM | IFX_PC_TFM_PROT | IFX_PC_TFM_AROT,
+        .w_mask     = IFX_PC_NONE, /**< No write to code, R/O data */
+    };
+#endif /* CONFIG_TFM_USE_TRUSTZONE */
+#endif /* IFX_ISOLATION_PC_SWITCHING */
+
+    /* finally, set the count */
+    if (idx > IFX_MAX_FIXED_CONFIGS) {
+        TFM_COVERITY_DEVIATE_LINE(deadcode, "Defensive overflow guard: may be reachable depending on the configuration");
+        tfm_core_panic();
+    }
+    ifx_fixed_mpc_static_config_count = idx;
+    FIH_RET(TFM_HAL_SUCCESS);
+}
+
+FIH_RET_TYPE(enum tfm_hal_status_t) ifx_mpc_isolate_numbered_mmio(
+                                                    const ifx_mpc_numbered_mmio_config_t* mpc_cfg,
+                                                    const struct asset_desc_t* asset)
+{
+    TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Directive_4_6, "FIH uses basic types without size and signedness")
+    TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_15_6, "Definition of FIH_SET() is missing {}, but FIH_PANIC is always a simple statement")
+    TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "Definition of FIH_SET() treats fih_delay() returned int as a bool")
+    IFX_FIH_DECLARE(enum tfm_hal_status_t, fih_rc, TFM_HAL_ERROR_GENERIC);
+    TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_15_6 MISRA_C_2023_Directive_4_6)
+    ifx_mpc_region_config_t mpc_reg_cfg;
+
+    mpc_reg_cfg.address = asset->mem.start;
+    mpc_reg_cfg.size    = asset->mem.limit - asset->mem.start;
+
+    mpc_reg_cfg.ns_mask = mpc_cfg->ns_mask;
+
+    mpc_reg_cfg.r_mask  = mpc_cfg->pc_mask;
+    mpc_reg_cfg.w_mask  = IFX_ASSET_ATTR_IS_SET(asset->attr, ASSET_ATTR_READ_WRITE) ?
+                          mpc_cfg->pc_mask : 0U;
+
+    TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_20_7, "Cannot wrap with parentheses due to Fault injection architecture and define FIH_RET_TYPE")
+    FIH_CALL(ifx_mpc_apply_configuration, fih_rc, &mpc_reg_cfg);
+    FIH_RET(fih_rc);
+}
+
+FIH_RET_TYPE(enum tfm_hal_status_t) ifx_mpc_apply_configuration(
+                                          const ifx_mpc_region_config_t* mpc_reg_cfg)
+{
+    const ifx_memory_config_t* memory_configs[IFX_REGION_MAX_MPC_COUNT];
+    uint32_t                   mpc_cnt = sizeof(memory_configs)/sizeof(memory_configs[0]);
+    enum tfm_hal_status_t      mem_cfg_res;
+    FIH_RET_TYPE(enum tfm_hal_status_t) mem_cfg_res_fih;
+
+    mem_cfg_res = ifx_get_all_memory_configs(memory_configs,
+                                             &mpc_cnt,
+                                             mpc_reg_cfg->address,
+                                             mpc_reg_cfg->size);
+
+    if (mem_cfg_res != TFM_HAL_SUCCESS) {
+        FIH_RET(mem_cfg_res);
+    }
+
+    for (uint32_t mem_idx = 0; mem_idx < mpc_cnt; mem_idx++) {
+        ifx_mpc_raw_region_config_t mpc_reg_cfg_raw = {
+            .mpc_base       = memory_configs[mem_idx]->mpc,
+            .mpc_block_size = memory_configs[mem_idx]->mpc_block_size,
+            .offset         = IFX_S_ADDRESS_ALIAS(mpc_reg_cfg->address)
+                               - memory_configs[mem_idx]->s_address,
+            .size           = mpc_reg_cfg->size,
+            .pc_apply_mask  = IFX_MPC_APPLY_ALL_PCS,
+            .ns_mask        = mpc_reg_cfg->ns_mask,
+            .r_mask         = mpc_reg_cfg->r_mask,
+            .w_mask         = mpc_reg_cfg->w_mask,
+        };
+
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_20_7, "Cannot wrap with parentheses due to Fault injection architecture and define FIH_RET_TYPE")
+        FIH_CALL(ifx_mpc_apply_raw_configuration, mem_cfg_res_fih, &mpc_reg_cfg_raw);
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_4, "Cannot change types due to Fault injection architecture")
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "Cannot change not equal logic due to Fault injection architecture and define FIH_NOT_EQ")
+        if (FIH_NOT_EQ(mem_cfg_res_fih, TFM_HAL_SUCCESS)) {
+            FIH_RET(mem_cfg_res_fih);
+        }
+        TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_10_4)
+    }
+
+    FIH_RET(TFM_HAL_SUCCESS);
+}
+
+FIH_RET_TYPE(enum tfm_hal_status_t) ifx_mpc_apply_raw_configuration(
+                                            const ifx_mpc_raw_region_config_t* mpc_reg_cfg)
+{
+    enum tfm_hal_status_t      mem_cfg_res;
+
+    if (mpc_reg_cfg == NULL) {
+        FIH_RET(TFM_HAL_ERROR_INVALID_INPUT);
+    }
+
+    /* External MPCs are not configured directly by TFM. */
+    if (IFX_MPC_IS_EXTERNAL(mpc_reg_cfg->mpc_base)) {
+#if IFX_SE_IPC_SERVICE_FULL || IFX_SE_IPC_SERVICE_BASE
+        /* Use external service to protect memory */
+        mem_cfg_res = ifx_mpc_sert_apply_configuration(mpc_reg_cfg);
+        if (mem_cfg_res != TFM_HAL_SUCCESS) {
+            /* Corresponding memory configuration was not found */
+            FIH_RET(mem_cfg_res);
+        }
+#else /* IFX_SE_IPC_SERVICE_FULL || IFX_SE_IPC_SERVICE_BASE */
+        FIH_RET(TFM_HAL_ERROR_NOT_SUPPORTED);
+#endif /* IFX_SE_IPC_SERVICE_FULL || IFX_SE_IPC_SERVICE_BASE */
+    } else {
+        /* Use MPC peripheral to protect */
+        mem_cfg_res = ifx_mpc_apply_configuration_with_mpc(mpc_reg_cfg);
+        if (mem_cfg_res != TFM_HAL_SUCCESS) {
+            /* Corresponding memory configuration was not found */
+            FIH_RET(mem_cfg_res);
+        }
+    }
+
+    FIH_RET(TFM_HAL_SUCCESS);
+}
+
+#ifdef TFM_FIH_PROFILE_ON
+FIH_RET_TYPE(enum tfm_hal_status_t) ifx_mpc_verify_configuration(
+                                            const ifx_mpc_region_config_t* mpc_reg_cfg)
+{
+    const ifx_memory_config_t* memory_configs[IFX_REGION_MAX_MPC_COUNT];
+    uint32_t                   mpc_cnt = sizeof(memory_configs)/sizeof(memory_configs[0]);
+    enum tfm_hal_status_t mem_cfg_res;
+
+    mem_cfg_res = ifx_get_all_memory_configs(memory_configs,
+                                             &mpc_cnt,
+                                             mpc_reg_cfg->address,
+                                             mpc_reg_cfg->size);
+
+    if (mem_cfg_res != TFM_HAL_SUCCESS) {
+        FIH_RET(mem_cfg_res);
+    }
+
+    for (uint32_t mem_idx = 0; mem_idx < mpc_cnt; mem_idx++) {
+        FIH_RET_TYPE(enum tfm_hal_status_t) mem_cfg_res_2;
+        ifx_mpc_raw_region_config_t mpc_reg_cfg_raw = {
+            .mpc_base       = memory_configs[mem_idx]->mpc,
+            .mpc_block_size = memory_configs[mem_idx]->mpc_block_size,
+            .offset         = IFX_S_ADDRESS_ALIAS(mpc_reg_cfg->address)
+                               - memory_configs[mem_idx]->s_address,
+            .size           = mpc_reg_cfg->size,
+            .pc_apply_mask  = IFX_MPC_APPLY_ALL_PCS,
+            .ns_mask        = mpc_reg_cfg->ns_mask,
+            .r_mask         = mpc_reg_cfg->r_mask,
+            .w_mask         = mpc_reg_cfg->w_mask,
+        };
+
+        FIH_CALL(ifx_mpc_verify_raw_configuration, mem_cfg_res_2, &mpc_reg_cfg_raw);
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_4, "Cannot change types due to Fault injection architecture")
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "Cannot change not equal logic due to Fault injection architecture and define FIH_NOT_EQ")
+        if (FIH_NOT_EQ(mem_cfg_res_2, TFM_HAL_SUCCESS)) {
+            FIH_RET(mem_cfg_res_2);
+        }
+        TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_10_4)
+    }
+
+    FIH_RET(TFM_HAL_SUCCESS);
+}
+
+FIH_RET_TYPE(enum tfm_hal_status_t) ifx_mpc_verify_raw_configuration(
+                                            const ifx_mpc_raw_region_config_t* mpc_reg_cfg)
+{
+    FIH_RET_TYPE(enum tfm_hal_status_t) mem_cfg_res;
+
+    /* External MPCs are not verified directly by TFM. */
+    TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_4, "Cannot change types due to Fault injection architecture")
+    if (IFX_MPC_IS_EXTERNAL(mpc_reg_cfg->mpc_base)) {
+#if IFX_SE_IPC_SERVICE_FULL || IFX_SE_IPC_SERVICE_BASE
+        /* Use external service to verify protection */
+        FIH_CALL(ifx_mpc_sert_verify_configuration,
+                    mem_cfg_res, mpc_reg_cfg);
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "Cannot change not equal logic due to Fault injection architecture and define FIH_NOT_EQ")
+        if (FIH_NOT_EQ(mem_cfg_res, TFM_HAL_SUCCESS)) {
+            FIH_RET(mem_cfg_res);
+        }
+#else /* IFX_SE_IPC_SERVICE_FULL || IFX_SE_IPC_SERVICE_BASE */
+        FIH_RET(TFM_HAL_ERROR_NOT_SUPPORTED);
+#endif /* IFX_SE_IPC_SERVICE_FULL || IFX_SE_IPC_SERVICE_BASE */
+    } else {
+        /* Read MPC directly */
+        FIH_CALL(ifx_mpc_verify_configuration_with_mpc,
+                    mem_cfg_res, mpc_reg_cfg);
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "Cannot change not equal logic due to Fault injection architecture and define FIH_NOT_EQ")
+        if (FIH_NOT_EQ(mem_cfg_res, TFM_HAL_SUCCESS)) {
+            FIH_RET(mem_cfg_res);
+        }
+    }
+    TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_10_4)
+
+    FIH_RET(TFM_HAL_SUCCESS);
+}
+#endif
+
+/* IMPROVEMENT: (DRIVERS-23742) Remove IFX_MPC_PDL_HAS_GET_VIOLATION_RESPONSE
+ * once PDL for all devices provides it */
+#if defined(TFM_FIH_PROFILE_ON) && !defined(IFX_MPC_PDL_HAS_GET_VIOLATION_RESPONSE)
+/*******************************************************************************
+* Function Name: Cy_Mpc_GetViolationResponse
+********************************************************************************
+*
+* \brief Get the violation response configuration for the referenced MPC.
+*
+* \param base
+* Base address of the MPC being queried.
+*
+* \return
+* Violation response configuration value (\ref cy_en_mpc_resp_cfg_t).
+*
+*******************************************************************************/
+static inline cy_en_mpc_resp_cfg_t Cy_Mpc_GetViolationResponse(const MPC_Type* base)
+{
+    uint32_t response = _FLD2VAL(RAMC_MPC_CFG_RESPONSE, base->CFG);
+    return (response == 1UL) ? CY_MPC_BUS_ERR : CY_MPC_RZWI;
+}
+#endif /* defined(TFM_FIH_PROFILE_ON) && !defined(IFX_MPC_PDL_HAS_GET_VIOLATION_RESPONSE) */
+
+#define IFX_MPC_BLOCK_SIZE_TO_BYTES(mpc_size)   (1UL << ((uint32_t)(mpc_size) + 5UL))
+
+#define IFX_MPC_BLK_CFG_BLOCK_SIZE_Pos 0UL
+#define IFX_MPC_BLK_CFG_BLOCK_SIZE_Msk 0xFUL
+
+#if IFX_MPC_DRIVER_HW_MPC && !IFX_MPC_DRIVER_HW_MPC_WITH_ROT && !IFX_MPC_DRIVER_HW_MPC_WITHOUT_ROT
+#error "IFX_MPC_DRIVER_HW_MPC is defined, but IFX_MPC_DRIVER_HW_MPC_WITH_ROT and IFX_MPC_DRIVER_HW_MPC_WITHOUT_ROT are not defined. Please define one or both of them."
+#endif
+
+#ifdef IFX_MEMORY_CONFIGURATOR_MPC_CONFIG
+#if IFX_MPC_DRIVER_HW_MPC_WITH_ROT
+static void ifx_mpc_get_unified_config_attr(const cy_stc_mpc_rot_cfg_t *rot_cfgs,
+                                            uint32_t rot_cfg_count,
+                                            ifx_mpc_raw_region_config_t *mpc_cfg)
+{
+    mpc_cfg->pc_apply_mask = 0UL;
+    mpc_cfg->ns_mask = 0UL;
+    mpc_cfg->r_mask = 0UL;
+    mpc_cfg->w_mask = 0UL;
+
+    for (uint32_t i = 0; i < rot_cfg_count; i++) {
+        const cy_stc_mpc_rot_cfg_t *rot_cfg = &rot_cfgs[i];
+        uint32_t pc_mask = 1UL << ((uint32_t)rot_cfg->pc);
+        /* Select only the PCs explicitly requested by the configuration and
+         * leave any other PC settings unchanged. */
+        mpc_cfg->pc_apply_mask |= pc_mask;
+        if (rot_cfg->secure == CY_MPC_NON_SECURE) {
+            mpc_cfg->ns_mask |= pc_mask;
+        }
+        switch (rot_cfg->access) {
+            case CY_MPC_ACCESS_RW: {
+                mpc_cfg->r_mask |= pc_mask;
+                mpc_cfg->w_mask |= pc_mask;
+                break;
+            }
+            case CY_MPC_ACCESS_R: {
+                mpc_cfg->r_mask |= pc_mask;
+                break;
+            }
+            case CY_MPC_ACCESS_W: {
+                mpc_cfg->w_mask |= pc_mask;
+                break;
+            }
+            default:
+                /* No action required for other access types */
+                break;
+        }
+    }
+    /* Add IFX_PC_DEFAULT to allow SE RT access to memory regions */
+    if (mpc_cfg->r_mask != 0UL) {
+        mpc_cfg->r_mask |= IFX_PC_DEFAULT;
+    }
+    if (mpc_cfg->w_mask != 0UL) {
+        mpc_cfg->w_mask |= IFX_PC_DEFAULT;
+    }
+}
+#endif /* IFX_MPC_DRIVER_HW_MPC_WITH_ROT */
+
+#if IFX_MPC_DRIVER_HW_MPC_WITHOUT_ROT
+static void ifx_mpc_get_unified_locked_rot_config_attr(const cy_stc_mpc_unified_t *mpc_unified,
+                                                       ifx_mpc_raw_region_config_t *mpc_cfg)
+{
+    mpc_cfg->pc_apply_mask = 0UL;
+    mpc_cfg->ns_mask = 0UL;
+    mpc_cfg->r_mask = 0UL;
+    mpc_cfg->w_mask = 0UL;
+
+    if (mpc_unified->locked_rot_cfg->secure == CY_MPC_NON_SECURE) {
+        /* ns_mask and pc_apply_mask are not checked per PC in non-rot
+         * configuration (they are just checked against 0), thus set them to
+         * IFX_PC_DEFAULT as a marker that region is Non-Secure. */
+        mpc_cfg->ns_mask = IFX_PC_DEFAULT;
+        mpc_cfg->pc_apply_mask = IFX_PC_DEFAULT;
+    }
+}
+#endif /* IFX_MPC_DRIVER_HW_MPC_WITHOUT_ROT */
+
+static void ifx_mpc_get_unified_region(const cy_stc_mpc_regions_t *mpc_region,
+                                       ifx_mpc_raw_region_config_t *mpc_cfg)
+{
+    TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_14_3, "IFX_MPC_IS_EXTERNAL() is a compile-time constant on some platforms, making one branch unreachable")
+    if (IFX_MPC_IS_EXTERNAL(mpc_region->base)) {
+        /* External MPCs can't be read directly, so the block size is taken from
+         * the static memory configuration table. */
+        const ifx_memory_config_t* mem_cfg = NULL;
+        if (ifx_find_memory_config_by_mpc(&mem_cfg, mpc_region->base,
+                                          ifx_memory_cm33_config,
+                                          ifx_memory_cm33_config_count) != TFM_HAL_SUCCESS) {
+            tfm_core_panic();
+        }
+        mpc_cfg->mpc_block_size = mem_cfg->mpc_block_size;
+    } else {
+        /* MPC is controlled by TF-M, so read the block size directly from the
+         * hardware register instead of looking it up in the memory
+         * configuration table, as the direct read is faster than the lookup. */
+        mpc_cfg->mpc_block_size = (cy_en_mpc_size_t)_FLD2VAL(IFX_MPC_BLK_CFG_BLOCK_SIZE,
+                                                             mpc_region->base->BLK_CFG);
+    }
+    TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_14_3)
+    mpc_cfg->mpc_base = mpc_region->base;
+    mpc_cfg->offset = mpc_region->offset;
+    mpc_cfg->size   = mpc_region->size;
+}
+#endif /* IFX_MEMORY_CONFIGURATOR_MPC_CONFIG */
+
+/**
+ * \brief Apply MPC configuration for MPC controller handled by TF-M.
+ *
+ * \param[in] mpc_reg_cfg   MPC configuration structure which will be applied.
+ *                          See \ref ifx_mpc_raw_region_config_t for more details.
+ *
+ * \return    TFM_HAL_SUCCESS             - MPC configuration applied successfully.
+ *            TFM_HAL_ERROR_GENERIC       - failed to apply MPC configuration.
+ */
+enum tfm_hal_status_t ifx_mpc_apply_configuration_with_mpc(
+                                        const ifx_mpc_raw_region_config_t* mpc_reg_cfg)
+{
+    const bool rot_config = IFX_MPC_IS_ROT(mpc_reg_cfg->mpc_base);
+
+    TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_14_3, "IFX_MPC_IS_ROT() is a compile-time constant on some platforms, making one branch unreachable")
+    if (rot_config) {
+        /* MPC config works with PC >= IFX_PC_TFM_SPM_ID. Lower PCs
+         * are responsible for protecting/verifying their own resources. */
+        for (uint32_t pc = IFX_PC_TFM_SPM_ID; pc < MPC_PC_NR; pc++) {
+            /* Apply only the PCs explicitly requested by the configuration and
+             * leave any other PC settings unchanged. */
+            if (IFX_GET_PC(mpc_reg_cfg->pc_apply_mask, pc) == 0U) {
+                continue;
+            }
+
+            cy_stc_mpc_rot_cfg_t mpc_rot_cfg;
+            mpc_rot_cfg.pc     = (cy_en_mpc_prot_context_t)pc;
+            mpc_rot_cfg.secure = ifx_mpc_secure_cfg(mpc_reg_cfg, (cy_en_mpc_prot_context_t)pc);
+            mpc_rot_cfg.access = ifx_mpc_access_cfg(mpc_reg_cfg, (cy_en_mpc_prot_context_t)pc);
+
+            if (Cy_Mpc_ConfigRotMpcStruct(mpc_reg_cfg->mpc_base,
+                                          mpc_reg_cfg->offset, mpc_reg_cfg->size,
+                                          &mpc_rot_cfg) != CY_MPC_SUCCESS) {
+                return TFM_HAL_ERROR_GENERIC;
+            }
+        }
+    } else {
+        cy_stc_mpc_cfg_t mpc_no_rot_cfg;
+        mpc_no_rot_cfg.secure = (mpc_reg_cfg->ns_mask == 0U) ? CY_MPC_SECURE : CY_MPC_NON_SECURE;
+        if (Cy_Mpc_ConfigMpcStruct(mpc_reg_cfg->mpc_base,
+                                   mpc_reg_cfg->offset, mpc_reg_cfg->size,
+                                   &mpc_no_rot_cfg) != CY_MPC_SUCCESS) {
+            return TFM_HAL_ERROR_GENERIC;
+        }
+    }
+    TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_14_3)
+
+    return TFM_HAL_SUCCESS;
+}
+
+#ifdef TFM_FIH_PROFILE_ON
+FIH_RET_TYPE(enum tfm_hal_status_t) ifx_mpc_verify_configuration_with_mpc(
+                                        const ifx_mpc_raw_region_config_t* mpc_reg_cfg)
+{
+    uint32_t block_size      = IFX_MPC_BLOCK_SIZE_TO_BYTES(mpc_reg_cfg->mpc_block_size);
+    uint32_t offset          = mpc_reg_cfg->offset;
+    uint32_t first_block_idx = offset / block_size;
+    uint32_t last_block_idx  = IFX_ROUND_UP_TO_MULTIPLE(offset + mpc_reg_cfg->size, block_size)
+                                / block_size;
+    uint32_t first_offset = first_block_idx * block_size;
+    uint32_t last_offset = last_block_idx * block_size;
+
+    const bool rot_config = IFX_MPC_IS_ROT(mpc_reg_cfg->mpc_base);
+
+    if (rot_config) {
+        /* MPC config works with PC >= IFX_PC_TFM_SPM_ID. Lower PCs
+         * are responsible for protecting/verifying their own resources. */
+        for (uint32_t pc = IFX_PC_TFM_SPM_ID; pc < MPC_PC_NR; pc++) {
+            /* Verify only the PCs explicitly requested by the configuration and
+             * leave any other PC settings unchanged. */
+            if (IFX_GET_PC(mpc_reg_cfg->pc_apply_mask, pc) == 0U) {
+                continue;
+            }
+
+            cy_en_mpc_sec_attr_t secure = ifx_mpc_secure_cfg(mpc_reg_cfg,
+                                                             (cy_en_mpc_prot_context_t)pc);
+            cy_en_mpc_access_attr_t access = ifx_mpc_access_cfg(mpc_reg_cfg,
+                                                                (cy_en_mpc_prot_context_t)pc);
+
+            for (uint32_t block_offset = first_offset;
+                 block_offset < last_offset;
+                 block_offset+=block_size) {
+                cy_stc_mpc_rot_block_attr_t mpc_rot_cfg;
+
+                /* Read the block config */
+                cy_en_mpc_status_t ret = Cy_Mpc_GetRotBlockAttr(mpc_reg_cfg->mpc_base,
+                                                                (cy_en_mpc_prot_context_t)pc,
+                                                                block_offset,
+                                                                &mpc_rot_cfg);
+
+                /* Check that it is as expected */
+                if ((ret != CY_MPC_SUCCESS)  ||
+                    (mpc_rot_cfg.secure != secure)  ||
+                    (mpc_rot_cfg.access != access)) {
+
+                    FIH_RET(TFM_HAL_ERROR_GENERIC);
+                }
+            }
+        }
+
+        FIH_RET(TFM_HAL_SUCCESS);
+    } else {
+        /* Non-RoT MPC: no PC dimension, verify security attribute for every block */
+        cy_en_mpc_sec_attr_t secure = (mpc_reg_cfg->ns_mask == 0U) ? CY_MPC_SECURE : CY_MPC_NON_SECURE;
+        for (uint32_t block_offset = first_offset;
+             block_offset < last_offset;
+             block_offset += block_size) {
+            cy_stc_mpc_block_attr_t mpc_no_rot_cfg;
+            if (Cy_Mpc_GetBlockAttr(mpc_reg_cfg->mpc_base, block_offset, &mpc_no_rot_cfg) != CY_MPC_SUCCESS) {
+                FIH_RET(TFM_HAL_ERROR_MEM_FAULT);
+            }
+            if (mpc_no_rot_cfg.secure != secure) {
+                FIH_RET(TFM_HAL_ERROR_GENERIC);
+            }
+        }
+        FIH_RET(TFM_HAL_SUCCESS);
+    }
+}
+#endif /* TFM_FIH_PROFILE_ON */
+
+FIH_RET_TYPE(enum tfm_hal_status_t) ifx_mpc_init_cfg(void)
+{
+    TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Directive_4_6, "FIH uses basic types without size and signedness")
+    TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_15_6, "Definition of FIH_SET() is missing {}, but FIH_PANIC is always a simple statement")
+    TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "Definition of FIH_SET() treats fih_delay() returned int as a bool")
+    IFX_FIH_DECLARE(enum tfm_hal_status_t, mpc_result, TFM_HAL_ERROR_BAD_STATE);
+    TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_15_6 MISRA_C_2023_Directive_4_6)
+
+    /* Populate ifx_fixed_mpc_static_config[] */
+    TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_20_7, "Cannot wrap with parentheses due to Fault injection architecture and define FIH_RET_TYPE")
+    FIH_CALL(ifx_mpc_fill_fixed_config, mpc_result);
+    TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_4, "Cannot change types due to Fault injection architecture")
+    TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "Cannot change not equal logic due to Fault injection architecture and define FIH_NOT_EQ")
+    if (FIH_NOT_EQ(mpc_result, TFM_HAL_SUCCESS)) {
+        FIH_RET(mpc_result);
+    }
+    TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_10_4)
+
+#if IFX_SE_IPC_SERVICE_FULL || IFX_SE_IPC_SERVICE_BASE
+    TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_20_7, "Cannot wrap with parentheses due to Fault injection architecture and define FIH_RET_TYPE")
+    FIH_CALL(ifx_mpc_sert_init, mpc_result);
+    TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_4, "Cannot change types due to Fault injection architecture")
+    TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "Cannot change not equal logic due to Fault injection architecture and define FIH_NOT_EQ")
+    if (FIH_NOT_EQ(mpc_result, TFM_HAL_SUCCESS)) {
+        FIH_RET(mpc_result);
+    }
+    TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_10_4)
+#endif /* IFX_SE_IPC_SERVICE_FULL || IFX_SE_IPC_SERVICE_BASE */
+
+    /*
+    * Starts changing actual configuration so issue DMB to ensure every
+    * transaction has completed by now
+    */
+    __DMB();
+
+#ifdef IFX_MEMORY_CONFIGURATOR_MPC_CONFIG
+    /* Apply MPC response */
+    for (uint32_t idx = 0UL; idx < cy_response_mpcs_count; idx++) {
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_4, "Count generated by Device Configurator can be signed or unsigned")
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_14_3, "IFX_MPC_IS_EXTERNAL() is a constant on some platforms")
+        if (!IFX_MPC_IS_EXTERNAL(cy_response_mpcs[idx].base)) {
+        TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_10_4)
+            cy_en_mpc_status_t status = Cy_Mpc_SetViolationResponse(cy_response_mpcs[idx].base,
+                                                                    cy_response_mpcs[idx].response);
+            if (status != CY_MPC_SUCCESS) {
+                FIH_RET(TFM_HAL_ERROR_GENERIC);
+            }
+        }
+    }
+
+    /* Apply predefined static MPC configuration for memory regions generated by TZ Configurator */
+    for (uint32_t idx = 0UL; idx < unified_mpc_domains_count; idx++) {
+        const cy_stc_mpc_unified_t *mpc_unified = &unified_mpc_domains[idx];
+        ifx_mpc_raw_region_config_t mpc_cfg;
+
+#if IFX_MPC_DRIVER_HW_MPC_WITH_ROT
+        ifx_mpc_get_unified_config_attr(mpc_unified->cfg, mpc_unified->cfg_count, &mpc_cfg);
+        for (uint32_t jdx = 0UL; jdx < mpc_unified->region_count; jdx++) {
+            /* IMPROVEMENT: Remove workaround when DRIVERS-23741 is fixed */
+            if (mpc_unified->regions[jdx].size == 0UL) {
+                /* Skip empty region */
+                continue;
+            }
+            ifx_mpc_get_unified_region(&mpc_unified->regions[jdx], &mpc_cfg);
+
+            FIH_CALL(ifx_mpc_apply_raw_configuration, mpc_result, &mpc_cfg);
+            TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_4, "Cannot change types due to Fault injection architecture")
+            TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "Cannot change not equal logic due to Fault injection architecture and define FIH_NOT_EQ")
+            if (FIH_NOT_EQ(mpc_result, TFM_HAL_SUCCESS)) {
+                FIH_RET(mpc_result);
+            }
+            TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_10_4)
+        }
+#endif /* IFX_MPC_DRIVER_HW_MPC_WITH_ROT */
+
+#if IFX_MPC_DRIVER_HW_MPC_WITHOUT_ROT
+        ifx_mpc_get_unified_locked_rot_config_attr(mpc_unified, &mpc_cfg);
+        for (uint32_t jdx = 0UL; jdx < mpc_unified->locked_rot_region_count; jdx++) {
+            /* IMPROVEMENT: Remove workaround when DRIVERS-23741 is fixed */
+            if (mpc_unified->locked_rot_regions[jdx].size == 0UL) {
+                /* Skip empty region */
+                continue;
+            }
+            ifx_mpc_get_unified_region(&mpc_unified->locked_rot_regions[jdx], &mpc_cfg);
+
+            FIH_CALL(ifx_mpc_apply_raw_configuration, mpc_result, &mpc_cfg);
+            TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_4, "Cannot change types due to Fault injection architecture")
+            TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "Cannot change not equal logic due to Fault injection architecture and define FIH_NOT_EQ")
+            if (FIH_NOT_EQ(mpc_result, TFM_HAL_SUCCESS)) {
+                FIH_RET(mpc_result);
+            }
+            TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_10_4)
+        }
+#endif /* IFX_MPC_DRIVER_HW_MPC_WITHOUT_ROT */
+    }
+
+#if defined(TFM_FIH_PROFILE_ON)
+    /*
+     * Some of the configs in cy_mpc_unified_config[] will be partially overridden
+     * by configs in ifx_fixed_mpc_static_config[], which means that verify
+     * of these partially-overwritten configs will fail if done after we
+     * apply those in ifx_fixed_mpc_static_config[]. So verify these ones now
+     */
+    for (uint32_t idx = 0UL; idx < unified_mpc_domains_count; idx++) {
+        const cy_stc_mpc_unified_t *mpc_unified = &unified_mpc_domains[idx];
+        ifx_mpc_raw_region_config_t mpc_cfg;
+
+#if IFX_MPC_DRIVER_HW_MPC_WITH_ROT
+        ifx_mpc_get_unified_config_attr(mpc_unified->cfg, mpc_unified->cfg_count, &mpc_cfg);
+        for (uint32_t jdx = 0UL; jdx < mpc_unified->region_count; jdx++) {
+            /* IMPROVEMENT: Remove workaround when DRIVERS-23741 is fixed */
+            if (mpc_unified->regions[jdx].size == 0UL) {
+                /* Skip empty region */
+                continue;
+            }
+            ifx_mpc_get_unified_region(&mpc_unified->regions[jdx], &mpc_cfg);
+
+            FIH_CALL(ifx_mpc_verify_raw_configuration, mpc_result, &mpc_cfg);
+            TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_4, "Cannot change types due to Fault injection architecture")
+            TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "Cannot change not equal logic due to Fault injection architecture and define FIH_NOT_EQ")
+            if (FIH_NOT_EQ(mpc_result, TFM_HAL_SUCCESS)) {
+                FIH_RET(mpc_result);
+            }
+            TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_10_4)
+        }
+#endif /* IFX_MPC_DRIVER_HW_MPC_WITH_ROT */
+
+#if IFX_MPC_DRIVER_HW_MPC_WITHOUT_ROT
+        ifx_mpc_get_unified_locked_rot_config_attr(mpc_unified, &mpc_cfg);
+        for (uint32_t jdx = 0UL; jdx < mpc_unified->locked_rot_region_count; jdx++) {
+            /* IMPROVEMENT: Remove workaround when DRIVERS-23741 is fixed */
+            if (mpc_unified->locked_rot_regions[jdx].size == 0UL) {
+                /* Skip empty region */
+                continue;
+            }
+            ifx_mpc_get_unified_region(&mpc_unified->locked_rot_regions[jdx], &mpc_cfg);
+
+            FIH_CALL(ifx_mpc_verify_raw_configuration, mpc_result, &mpc_cfg);
+            TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_4, "Cannot change types due to Fault injection architecture")
+            TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "Cannot change not equal logic due to Fault injection architecture and define FIH_NOT_EQ")
+            if (FIH_NOT_EQ(mpc_result, TFM_HAL_SUCCESS)) {
+                FIH_RET(mpc_result);
+            }
+            TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_10_4)
+        }
+#endif /* IFX_MPC_DRIVER_HW_MPC_WITHOUT_ROT */
+    }
+#endif /* defined(TFM_FIH_PROFILE_ON) */
+#else /* IFX_MEMORY_CONFIGURATOR_MPC_CONFIG */
+    /* Set violation response for all used memory types */
+    for (uint32_t idx = 0UL; idx < ifx_memory_cm33_config_count; idx++) {
+        /* Some MPCs are external and are not controlled by TFM. */
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_14_3, "IFX_MPC_IS_EXTERNAL() is a constant on some platforms")
+        if (!IFX_MPC_IS_EXTERNAL(ifx_memory_cm33_config[idx]->mpc)) {
+            /* Set violation response as Bus Error instead RZWI */
+            (void)Cy_Mpc_SetViolationResponse(ifx_memory_cm33_config[idx]->mpc, CY_MPC_BUS_ERR);
+        }
+    }
+
+#if IFX_MPC_CM55_MPC
+    for (uint32_t idx = 0UL; idx < ifx_memory_cm55_config_count; idx++) {
+        /* Some MPCs are external and are not controlled by TFM. */
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_14_3, "IFX_MPC_IS_EXTERNAL() is a constant on some platforms")
+        if (!IFX_MPC_IS_EXTERNAL(ifx_memory_cm55_config[idx]->mpc)) {
+            /* Set violation response as Bus Error instead RZWI */
+            (void)Cy_Mpc_SetViolationResponse(ifx_memory_cm55_config[idx]->mpc, CY_MPC_BUS_ERR);
+        }
+    }
+#endif /* IFX_MPC_CM55_MPC */
+
+    /* Apply predefined static MPC configuration for memory regions */
+    for (uint32_t idx = 0UL; idx < ifx_mpc_static_config_count; idx++) {
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_20_7, "Cannot wrap with parentheses due to Fault injection architecture and define FIH_RET_TYPE")
+        FIH_CALL(ifx_mpc_apply_configuration, mpc_result,
+                 &ifx_mpc_static_config[idx]);
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_4, "Cannot change types due to Fault injection architecture")
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "Cannot change not equal logic due to Fault injection architecture and define FIH_NOT_EQ")
+        if (FIH_NOT_EQ(mpc_result, TFM_HAL_SUCCESS)) {
+            FIH_RET(mpc_result);
+        }
+        TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_10_4)
+    }
+
+#if defined(TFM_FIH_PROFILE_ON)
+    /*
+     * Some of the configs in ifx_mpc_static_config[] will be partially overridden
+     * by configs in ifx_fixed_mpc_static_config[], which means that verify
+     * of these partially-overwritten configs will fail if done after we
+     * apply those in ifx_fixed_mpc_static_config[]. So verify these ones now
+     */
+
+    for (uint32_t idx = 0UL; idx < ifx_mpc_static_config_count; idx++) {
+        FIH_RET_TYPE(enum tfm_hal_status_t) ret;
+
+        FIH_CALL(ifx_mpc_verify_configuration, ret, &ifx_mpc_static_config[idx]);
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_4, "Cannot change types due to Fault injection architecture")
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "Cannot change not equal logic due to Fault injection architecture and define FIH_NOT_EQ")
+        if (FIH_NOT_EQ(ret, TFM_HAL_SUCCESS)) {
+            FIH_RET(ret);
+        }
+        TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_10_4)
+    }
+#endif /* defined(TFM_FIH_PROFILE_ON) */
+#endif /* IFX_MEMORY_CONFIGURATOR_MPC_CONFIG */
+
+    for (uint32_t idx = 0UL; idx < ifx_fixed_mpc_static_config_count; idx++) {
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_20_7, "Cannot wrap with parentheses due to Fault injection architecture and define FIH_RET_TYPE")
+        FIH_CALL(ifx_mpc_apply_configuration, mpc_result,
+                 &ifx_fixed_mpc_static_config[idx]);
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_4, "Cannot change types due to Fault injection architecture")
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "Cannot change not equal logic due to Fault injection architecture and define FIH_NOT_EQ")
+        if (FIH_NOT_EQ(mpc_result, TFM_HAL_SUCCESS)) {
+            FIH_RET(mpc_result);
+        }
+        TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_10_4)
+    }
+
+    /* Add barriers to assure the MPC configuration is done before continue
+     * the execution.
+     */
+    __DSB();
+    __ISB();
+
+    FIH_RET(TFM_HAL_SUCCESS);
+}
+
+#ifdef TFM_FIH_PROFILE_ON
+FIH_RET_TYPE(enum tfm_hal_status_t) ifx_mpc_verify_static_boundaries(void)
+{
+    TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Directive_4_6, "FIH uses basic types without size and signedness")
+    TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_15_6, "Definition of FIH_SET() is missing {}, but FIH_PANIC is always a simple statement")
+    TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "Definition of FIH_SET() treats fih_delay() returned int as a bool")
+    IFX_FIH_DECLARE(enum tfm_hal_status_t, ret, TFM_HAL_ERROR_GENERIC);
+    TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_15_6 MISRA_C_2023_Directive_4_6)
+
+    /* Populate ifx_fixed_mpc_static_config[] again, in case of fault injection */
+    TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_20_7, "Cannot wrap with parentheses due to Fault injection architecture and define FIH_RET_TYPE")
+    FIH_CALL(ifx_mpc_fill_fixed_config, ret);
+    TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_4, "Cannot change types due to Fault injection architecture")
+    TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "Cannot change not equal logic due to Fault injection architecture and define FIH_NOT_EQ")
+    if (FIH_NOT_EQ(ret, TFM_HAL_SUCCESS)) {
+        FIH_RET(ret);
+    }
+    TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_10_4)
+
+#ifdef IFX_MEMORY_CONFIGURATOR_MPC_CONFIG
+    /* Check violation response provided by Device Configurator */
+    for (uint32_t idx = 0UL; idx < cy_response_mpcs_count; idx++) {
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_4, "Count generated by Device Configurator can be signed or unsigned")
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_14_3, "IFX_MPC_IS_EXTERNAL() is a constant on some platforms")
+        if (!IFX_MPC_IS_EXTERNAL(cy_response_mpcs[idx].base)) {
+        TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_10_4)
+            cy_en_mpc_resp_cfg_t response = Cy_Mpc_GetViolationResponse(cy_response_mpcs[idx].base);
+            if (response != cy_response_mpcs[idx].response) {
+                FIH_RET(TFM_HAL_ERROR_GENERIC);
+            }
+        }
+    }
+#else
+    /* Check violation response for all used memory types */
+    for (uint32_t idx = 0UL; idx < ifx_memory_cm33_config_count; idx++) {
+        /* Some MPCs are external and are not controlled by TFM. */
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_14_3, "IFX_MPC_IS_EXTERNAL() is a constant on some platforms")
+        if (!IFX_MPC_IS_EXTERNAL(ifx_memory_cm33_config[idx]->mpc)) {
+            /* Read back violation response, should be Bus Error */
+            cy_en_mpc_resp_cfg_t response = Cy_Mpc_GetViolationResponse(ifx_memory_cm33_config[idx]->mpc);
+            if (response != CY_MPC_BUS_ERR) {
+                FIH_RET(TFM_HAL_ERROR_GENERIC);
+            }
+        }
+    }
+
+#if IFX_MPC_CM55_MPC
+    for (uint32_t idx = 0UL; idx < ifx_memory_cm55_config_count; idx++) {
+        /* Some MPCs are external and are not controlled by TFM. */
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_14_3, "IFX_MPC_IS_EXTERNAL() is a constant on some platforms")
+        if (!IFX_MPC_IS_EXTERNAL(ifx_memory_cm55_config[idx]->mpc)) {
+            /* Read back violation response, should be Bus Error */
+            cy_en_mpc_resp_cfg_t response = Cy_Mpc_GetViolationResponse(ifx_memory_cm55_config[idx]->mpc);
+            if (response != CY_MPC_BUS_ERR) {
+                FIH_RET(TFM_HAL_ERROR_GENERIC);
+            }
+        }
+    }
+#endif /* IFX_MPC_CM55_MPC */
+#endif /* IFX_MEMORY_CONFIGURATOR_MPC_CONFIG */
+
+    /*
+     * Some of the configs in ifx_mpc_static_config[] are partially overridden
+     * by configs in ifx_fixed_mpc_static_config[], which means that verify
+     * of these partially-overwritten configs will fail if done after we
+     * apply those in ifx_fixed_mpc_static_config[]. So we verified those ones
+     * immediately after applying them instead.
+     */
+
+    for (uint32_t idx = 0UL; idx < ifx_fixed_mpc_static_config_count; idx++) {
+        FIH_CALL(ifx_mpc_verify_configuration, ret, &ifx_fixed_mpc_static_config[idx]);
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_4, "Cannot change types due to Fault injection architecture")
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "Cannot change not equal logic due to Fault injection architecture and define FIH_NOT_EQ")
+        if (FIH_NOT_EQ(ret, TFM_HAL_SUCCESS)) {
+            FIH_RET(ret);
+        }
+        TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_10_4)
+    }
+
+    FIH_RET(TFM_HAL_SUCCESS);
+}
+#endif /* TFM_FIH_PROFILE_ON */
+
+FIH_RET_TYPE(enum tfm_hal_status_t) ifx_mpc_memory_check(const struct ifx_partition_info_t *p_info,
+                                                         uintptr_t base,
+                                                         size_t size,
+                                                         uint32_t access_type)
+{
+    ifx_memory_region_split_t splits[IFX_MAX_SPLIT_REGIONS_COUNT] = {0};
+    uint32_t split_count = ARRAY_SIZE(splits);
+#if defined(TFM_FIH_PROFILE_ON) && !defined(TFM_FIH_PROFILE_LOW)
+    ifx_memory_region_split_t splits2[IFX_MAX_SPLIT_REGIONS_COUNT] = {0};
+    uint32_t split_count2 = ARRAY_SIZE(splits2);
+#endif
+
+#if CONFIG_TFM_PSA_CALL_ADDRESS_REMAP
+    bool is_ns_cpu_internal_memory =
+#if defined(TFM_PARTITION_NS_AGENT_MAILBOX)
+    TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "external macro IS_NS_AGENT_MAILBOX interprets non-boolean type as a boolean")
+                            ((IS_NS_AGENT_MAILBOX(p_info->p_ldinfo))
+                             && ifx_is_ns_cpu_internal_memory(base, size)) ||
+#elif IFX_MTB_MAILBOX
+    TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "external macro IS_NS_AGENT_TZ interprets non-boolean type as a boolean")
+                            ((IS_NS_AGENT_TZ(p_info->p_ldinfo))
+                             && ifx_is_ns_cpu_internal_memory_remapped(base, size)) ||
+#endif /* defined(TFM_PARTITION_NS_AGENT_MAILBOX) */
+                            false;
+
+#if defined(TFM_FIH_PROFILE_ON) && !defined(TFM_FIH_PROFILE_LOW)
+    (void)fih_delay();
+
+    bool is_ns_cpu_internal_memory2 =
+#if defined(TFM_PARTITION_NS_AGENT_MAILBOX)
+    TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "external macro IS_NS_AGENT_MAILBOX interprets non-boolean type as a boolean")
+                            ((IS_NS_AGENT_MAILBOX(p_info->p_ldinfo))
+                             && ifx_is_ns_cpu_internal_memory(base, size)) ||
+#elif IFX_MTB_MAILBOX
+    TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "external macro IS_NS_AGENT_TZ interprets non-boolean type as a boolean")
+                            ((IS_NS_AGENT_TZ(p_info->p_ldinfo))
+                             && ifx_is_ns_cpu_internal_memory_remapped(base, size)) ||
+#endif /* defined(TFM_PARTITION_NS_AGENT_MAILBOX) */
+                            false;
+
+    if (is_ns_cpu_internal_memory != is_ns_cpu_internal_memory2) {
+        FIH_RET(TFM_HAL_ERROR_MEM_FAULT);
+    }
+#endif /* defined(TFM_FIH_PROFILE_ON) && !defined(TFM_FIH_PROFILE_LOW) */
+
+    if (is_ns_cpu_internal_memory) {
+        FIH_RET(TFM_HAL_SUCCESS);
+    }
+#endif /* CONFIG_TFM_PSA_CALL_ADDRESS_REMAP */
+
+    /* CM33 memory list is a comprehensive list of memory regions for the
+     * device, protections applied to other memory lists are also applied to CM33
+     * memory list so checking only CM 33 list is enough. */
+    enum tfm_hal_status_t res = ifx_split_memory_region_across_mpcs(base, size,
+                                                                    ifx_memory_cm33_config,
+                                                                    ifx_memory_cm33_config_count,
+                                                                    splits, &split_count);
+    if ((res != TFM_HAL_SUCCESS) || (split_count == 0U)) {
+        FIH_RET(TFM_HAL_ERROR_INVALID_INPUT);
+    }
+
+#if defined(TFM_FIH_PROFILE_ON) && !defined(TFM_FIH_PROFILE_LOW)
+    (void)fih_delay();
+    enum tfm_hal_status_t res2 = ifx_split_memory_region_across_mpcs(base, size,
+                                                                ifx_memory_cm33_config,
+                                                                ifx_memory_cm33_config_count,
+                                                                splits2, &split_count2);
+
+    if ((res2 != TFM_HAL_SUCCESS) || (split_count2 == 0U) || (split_count != split_count2)) {
+        FIH_RET(TFM_HAL_ERROR_INVALID_INPUT);
+    }
+
+    for (size_t i = 0; i < split_count2; i++) {
+        if ((splits[i].mpc_config != splits2[i].mpc_config) ||
+        (splits[i].region_address != splits2[i].region_address) ||
+        (splits[i].region_size != splits2[i].region_size)) {
+            FIH_RET(TFM_HAL_ERROR_MEM_FAULT);
+        }
+    }
+#endif
+
+#if defined(TFM_FIH_PROFILE_ON) && !defined(TFM_FIH_PROFILE_LOW)
+    volatile uint32_t validated_split_count = split_count;
+#endif
+
+    size_t i;
+    for (i = 0; i < split_count; i++) {
+        /* base and size are overwritten with splits values to ensure that the original
+         * base and size will not be mistakenly used when applying configuration */
+        const ifx_memory_config_t* mem_region_cfg = splits[i].mpc_config;
+        base = splits[i].region_address;
+        size = splits[i].region_size;
+
+        uint32_t block_size      = IFX_MPC_BLOCK_SIZE_TO_BYTES(mem_region_cfg->mpc_block_size);
+        uint32_t offset          = IFX_S_ADDRESS_ALIAS(base) - mem_region_cfg->s_address;
+        uint32_t first_block_idx = offset / block_size;
+        uint32_t last_block_idx  = IFX_ROUND_UP_TO_MULTIPLE(offset + size, block_size) / block_size;
+        uint32_t last_offset     = last_block_idx * block_size;
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Directive_4_6, "FIH uses basic types without size and signedness")
+        IFX_FIH_BOOL is_secure = ((access_type & TFM_HAL_ACCESS_NS) == 0U) ? IFX_FIH_TRUE : IFX_FIH_FALSE;
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_10_1, "external macro IS_NS_AGENT interprets non-boolean type as a boolean")
+        fih_int pc               = FIH_INVALID_VALUE;
+
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Directive_4_6, "FIH uses basic types without size and signedness")
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_4, "Cannot change types due to Fault injection architecture")
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_1, "Cannot change equal logic due to Fault injection architecture and define FIH_EQ")
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_13_2, "Volatile variables do not have side-effects, so read order doesn't matter")
+        TFM_COVERITY_DEVIATE_LINE(cert_exp30_c, "Volatile variables do not have side-effects, so read order doesn't matter")
+        pc = IFX_GET_PARTITION_PC(p_info, IFX_FIH_EQ(is_secure, IFX_FIH_TRUE));
+        TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_13_2 MISRA_C_2023_Rule_10_1 MISRA_C_2023_Rule_10_4 MISRA_C_2023_Directive_4_6)
+        fih_int_validate(pc);
+
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Directive_4_6, "FIH uses basic types without size and signedness")
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_1, "external macro IS_NS_AGENT interprets non-boolean type as a boolean")
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_13_2, "Volatile variables do not have side-effects, so read order doesn't matter")
+        TFM_COVERITY_DEVIATE_LINE(cert_exp30_c, "Volatile variables do not have side-effects, so read order doesn't matter")
+        cy_en_mpc_sec_attr_t expected_sec_attr = (IS_NS_AGENT(p_info->p_ldinfo) && IFX_FIH_EQ(is_secure, IFX_FIH_FALSE)) ? CY_MPC_NON_SECURE : CY_MPC_SECURE;
+        TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_13_2 MISRA_C_2023_Rule_10_1 MISRA_C_2023_Directive_4_6)
+
+#if defined(TFM_FIH_PROFILE_ON) && !defined(TFM_FIH_PROFILE_LOW)
+        (void)fih_delay();
+        volatile uint32_t access_type_2 = access_type;
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Directive_4_6, "FIH uses basic types without size and signedness")
+        IFX_FIH_BOOL is_secure2 = ((access_type_2 & TFM_HAL_ACCESS_NS) == 0U) ? IFX_FIH_TRUE : IFX_FIH_FALSE;
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Directive_4_6, "FIH uses basic types without size and signedness")
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_4, "Cannot change types due to Fault injection architecture")
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_10_1, "Cannot change equal logic due to Fault injection architecture and define FIH_EQ")
+        TFM_COVERITY_DEVIATE_BLOCK(MISRA_C_2023_Rule_13_2, "Volatile variables do not have side-effects, so read order doesn't matter")
+        TFM_COVERITY_DEVIATE_LINE(cert_exp30_c, "Volatile variables do not have side-effects, so read order doesn't matter")
+        if (!IFX_FIH_EQ(is_secure, is_secure2)) {
+            FIH_RET(TFM_HAL_ERROR_MEM_FAULT);
+        }
+        TFM_COVERITY_BLOCK_END(MISRA_C_2023_Rule_13_2 MISRA_C_2023_Rule_10_1 MISRA_C_2023_Rule_10_4 MISRA_C_2023_Directive_4_6)
+
+        volatile uint32_t validated_block_count = 0;
+#endif
+
+        TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_14_3, "IFX_MPC_IS_EXTERNAL() is a constant on some platforms")
+        if (IFX_MPC_IS_EXTERNAL(mem_region_cfg->mpc)) {
+#if IFX_SE_IPC_SERVICE_FULL || IFX_SE_IPC_SERVICE_BASE
+            FIH_RET_TYPE(enum tfm_hal_status_t) ret;
+            FIH_CALL(ifx_mpc_sert_memory_check,
+                    ret, p_info, mem_region_cfg, base, size, access_type);
+            FIH_RET(ret);
+#else /* IFX_SE_IPC_SERVICE_FULL || IFX_SE_IPC_SERVICE_BASE */
+            /* If MPC is not controlled by TFM neither by SE RT Services
+             * then the assumption is that partition has no access to it */
+            FIH_RET(TFM_HAL_ERROR_MEM_FAULT);
+#endif /* IFX_SE_IPC_SERVICE_FULL || IFX_SE_IPC_SERVICE_BASE */
+        }
+
+        const bool rot_config = IFX_MPC_IS_ROT(mem_region_cfg->mpc);
+
+        /* Align offset to the block size */
+        for (uint32_t block_offset = first_block_idx * block_size;
+            block_offset < last_offset;
+            block_offset += block_size) {
+            cy_stc_mpc_rot_block_attr_t mpc_settings;
+            cy_stc_mpc_block_attr_t mpc_settings_no_rot;
+
+            if (rot_config) {
+                if (Cy_Mpc_GetRotBlockAttr(mem_region_cfg->mpc,
+                                        (cy_en_mpc_prot_context_t)fih_int_decode(pc),
+                                        block_offset,
+                                        &mpc_settings) != CY_MPC_SUCCESS) {
+                    FIH_RET(TFM_HAL_ERROR_MEM_FAULT);
+                }
+            } else {
+                TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_14_3, "rot_config is a constant on some platforms")
+                if (Cy_Mpc_GetBlockAttr(mem_region_cfg->mpc,
+                                        block_offset,
+                                        &mpc_settings_no_rot) != CY_MPC_SUCCESS) {
+                    FIH_RET(TFM_HAL_ERROR_MEM_FAULT);
+                }
+            }
+
+#if defined(TFM_FIH_PROFILE_ON) && !defined(TFM_FIH_PROFILE_LOW)
+            (void)fih_delay();
+
+            if (rot_config) {
+                cy_stc_mpc_rot_block_attr_t mpc_settings2;
+                if (Cy_Mpc_GetRotBlockAttr(mem_region_cfg->mpc,
+                                        (cy_en_mpc_prot_context_t)fih_int_decode(pc),
+                                        block_offset,
+                                        &mpc_settings2) != CY_MPC_SUCCESS) {
+                    FIH_RET(TFM_HAL_ERROR_MEM_FAULT);
+                }
+
+                (void)fih_delay();
+                if ((mpc_settings.access != mpc_settings2.access) ||
+                    (mpc_settings.secure != mpc_settings2.secure)) {
+                    FIH_RET(TFM_HAL_ERROR_MEM_FAULT);
+                }
+            } else {
+                cy_stc_mpc_block_attr_t mpc_settings_no_rot2;
+                if (Cy_Mpc_GetBlockAttr(mem_region_cfg->mpc,
+                                        block_offset,
+                                        &mpc_settings_no_rot2) != CY_MPC_SUCCESS) {
+                    FIH_RET(TFM_HAL_ERROR_MEM_FAULT);
+                }
+
+                (void)fih_delay();
+                TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_14_3, "rot_config is a constant on some platforms")
+                if (mpc_settings_no_rot.secure != mpc_settings_no_rot2.secure) {
+                    FIH_RET(TFM_HAL_ERROR_MEM_FAULT);
+                }
+            }
+
+            (void)fih_delay();
+            validated_block_count++;
+#endif /* defined(TFM_FIH_PROFILE_ON) && !defined(TFM_FIH_PROFILE_LOW) */
+
+            if (rot_config) {
+                if (mpc_settings.secure != expected_sec_attr) {
+                    FIH_RET(TFM_HAL_ERROR_MEM_FAULT);
+                }
+
+                /* If MPC has RW access then any (R, W, RW) access is allowed, so no
+                 * need for additional checks. */
+                if (mpc_settings.access == CY_MPC_ACCESS_RW) {
+                    continue;
+                }
+
+                if (((access_type & TFM_HAL_ACCESS_READABLE) != 0U) &&
+                    (mpc_settings.access != CY_MPC_ACCESS_R)) {
+                    FIH_RET(TFM_HAL_ERROR_MEM_FAULT);
+                }
+
+                if (((access_type & TFM_HAL_ACCESS_WRITABLE) != 0U) &&
+                    (mpc_settings.access != CY_MPC_ACCESS_W)) {
+                    FIH_RET(TFM_HAL_ERROR_MEM_FAULT);
+                }
+            } else {
+                TFM_COVERITY_DEVIATE_LINE(MISRA_C_2023_Rule_14_3, "rot_config is a constant on some platforms")
+                if (mpc_settings_no_rot.secure != expected_sec_attr) {
+                    FIH_RET(TFM_HAL_ERROR_MEM_FAULT);
+                }
+            }
+        }
+
+#if defined(TFM_FIH_PROFILE_ON) && !defined(TFM_FIH_PROFILE_LOW)
+        (void)fih_delay();
+        if (validated_block_count != (last_block_idx - first_block_idx)) {
+            FIH_RET(TFM_HAL_ERROR_MEM_FAULT);
+        }
+        validated_split_count--;
+#endif
+    }
+
+#if defined(TFM_FIH_PROFILE_ON) && !defined(TFM_FIH_PROFILE_LOW)
+    /* Confirm every split was actually inspected. Checking both the loop index
+     * and the countdown counter keeps them as distinct values so the compiler
+     * cannot merge them into a single register. */
+    (void)fih_delay();
+    if ((i != split_count) || (validated_split_count != 0U)) {
+        FIH_RET(TFM_HAL_ERROR_MEM_FAULT);
+    }
+#endif
+
+    FIH_RET(TFM_HAL_SUCCESS);
+}

@@ -1,0 +1,81 @@
+From 52567d5567d1d0e89a2978bc015380773d88e49a Mon Sep 17 00:00:00 2001
+From: "Kozemchuk Ivan (CSS ICW SW SCV BFS SFW / EE)"
+ <Ivan.Kozemchuk-EE@infineon.com>
+Date: Thu, 6 Nov 2025 12:52:40 +0200
+Subject: [PATCH 14/16] Allow to check algorithm support without key generation
+
+In case when key generation is disabled, use dummy keys for algorithm
+support check instead of generating new keys. This avoids issues with
+drivers that do not support key generation.
+---
+ crypto_adapters/t_cose_psa_crypto.c | 35 ++++++++++++++++++++++++++++-
+ 1 file changed, 34 insertions(+), 1 deletion(-)
+
+diff --git a/crypto_adapters/t_cose_psa_crypto.c b/crypto_adapters/t_cose_psa_crypto.c
+index 3b9ed97..d97ea96 100644
+--- a/crypto_adapters/t_cose_psa_crypto.c
++++ b/crypto_adapters/t_cose_psa_crypto.c
+@@ -51,6 +51,15 @@
+ #warning "Use of COSE algorithms A128KW..A256KW will return an error"
+ #endif /* MBEDTLS_VERSION_MAJOR < 3 */
+ 
++#ifdef T_COSE_DISABLE_PSA_KEY_GENERATION
++/* ec_P_* keys are defined in tests files that are built for tests only, so to
++ * avoid issues with arm CLang linking - weak definitions of those keys are
++ * provided */
++const unsigned char ec_P_256_priv_key_sec1[32] __attribute__((weak)) = {0};
++const unsigned char ec_P_384_priv_key_sec1[48] __attribute__((weak)) = {0};
++const unsigned char ec_P_521_priv_key_sec1[66] __attribute__((weak)) = {0};
++#include "../examples/example_keys.h"
++#endif
+ 
+ /* Avoid compiler warning due to unused argument */
+ #define ARG_UNUSED(arg) (void)(arg)
+@@ -196,6 +205,22 @@ bool t_cose_crypto_is_algorithm_supported(int32_t cose_algorithm_id)
+             }
+ 
+             psa_algorithm_t sign_alg = PSA_ALG_ECDSA(hash_alg);
++#ifdef T_COSE_DISABLE_PSA_KEY_GENERATION
++            struct q_useful_buf_c dummy_key_bytes =
++                (cose_algorithm_id == T_COSE_ALGORITHM_ES256) ? Q_USEFUL_BUF_FROM_BYTE_ARRAY_LITERAL(ec_P_256_priv_key_sec1) :
++                #ifndef T_COSE_DISABLE_ES384
++                (cose_algorithm_id == T_COSE_ALGORITHM_ES384) ? Q_USEFUL_BUF_FROM_BYTE_ARRAY_LITERAL(ec_P_384_priv_key_sec1) :
++                #endif
++                #ifndef T_COSE_DISABLE_ES512
++                (cose_algorithm_id == T_COSE_ALGORITHM_ES512) ? Q_USEFUL_BUF_FROM_BYTE_ARRAY_LITERAL(ec_P_521_priv_key_sec1) :
++                #endif
++                NULL_Q_USEFUL_BUF_C; /* Default case - should not happen */
++
++            /* Check if we got a valid key */
++            if (q_useful_buf_c_is_null(dummy_key_bytes)) {
++                return false;
++            }
++#endif
+ 
+             psa_status_t status;
+             psa_key_id_t key = PSA_KEY_ID_NULL;
+@@ -209,12 +234,20 @@ bool t_cose_crypto_is_algorithm_supported(int32_t cose_algorithm_id)
+             psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_SIGN_HASH);
+             psa_set_key_algorithm(&attr, sign_alg);
+ 
++#ifdef T_COSE_DISABLE_PSA_KEY_GENERATION
++            /* Import dummy key instead of generating */
++            status = psa_import_key(&attr, dummy_key_bytes.ptr, dummy_key_bytes.len, &key);
++            psa_reset_key_attributes(&attr);
++            if (status != PSA_SUCCESS) {
++                return false;
++            }
++#else
+             status = psa_generate_key(&attr, &key);
+             psa_reset_key_attributes(&attr);
+             if (status != PSA_SUCCESS) {
+                 return false;
+             }
+-
++#endif
+             uint8_t sig[PSA_SIGNATURE_MAX_SIZE];
+             size_t sig_len = 0;
+             status = psa_sign_hash(key, sign_alg, hash, PSA_HASH_LENGTH(hash_alg), sig, sizeof(sig), &sig_len);
+-- 
+2.52.0.windows.1
+

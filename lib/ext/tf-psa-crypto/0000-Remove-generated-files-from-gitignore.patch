@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Infineon Technologies AG <open-source@infineon.com>
+Date: Mon, 23 Jun 2026 10:30:00 +0000
+Subject: [PATCH 00/17] Remove generated files from .gitignore
+
+Remove generated wrapper files from .gitignore so they are tracked as
+untracked files instead of ignored. This ensures git stash -u properly
+preserves them during patch validation in TF-M's apply_patches().
+
+The generated files are added by subsequent patches and need to survive
+CMake reconfiguration cycles during incremental builds.
+
+Signed-off-by: Infineon Technologies AG <open-source@infineon.com>
+---
+ core/.gitignore | 7 -------
+ 1 file changed, 7 deletions(-)
+
+diff --git a/core/.gitignore b/core/.gitignore
+index 1234567..e69de29 100644
+--- a/core/.gitignore
++++ b/core/.gitignore
+@@ -1,7 +0,0 @@
+-###START_GENERATED_FILES###
+-/psa_crypto_driver_wrappers.h
+-/psa_crypto_driver_wrappers_no_static.c
+-/tf_psa_crypto_config_check_before.h
+-/tf_psa_crypto_config_check_final.h
+-/tf_psa_crypto_config_check_user.h
+-###END_GENERATED_FILES###
